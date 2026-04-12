@@ -6,7 +6,7 @@ import json
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,7 +95,7 @@ class WorktreeEngine:
         # Generate IDs
         if not session_id:
             session_id = str(uuid.uuid4())[:8]
-        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
         project_slug = _slugify(project_root.name)
         branch_name = f"kote/{session_id}-{_slugify(task_description)[:30]}"
 
@@ -107,10 +107,10 @@ class WorktreeEngine:
 
         # Determine base
         if base_branch is None:
-            try:
-                base_branch = repo.active_branch.name
-            except TypeError:
+            if repo.head.is_detached:
                 base_branch = "HEAD"
+            else:
+                base_branch = repo.active_branch.name
 
         # Create branch + worktree
         repo.git.worktree("add", "-b", branch_name, str(worktree_path), base_branch)
@@ -127,7 +127,7 @@ class WorktreeEngine:
 
         append_audit(
             {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                 "event": "worktree_created",
                 "session_id": session_id,
                 "details": {
@@ -185,12 +185,12 @@ class WorktreeEngine:
         self._remove_worktree(meta)
 
         meta.status = SessionStatus.COMPLETED
-        meta.completed_at = datetime.utcnow()
+        meta.completed_at = datetime.now(tz=timezone.utc)
         save_session(meta)
 
         append_audit(
             {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                 "event": "worktree_accepted",
                 "session_id": session_id,
             }
@@ -206,12 +206,12 @@ class WorktreeEngine:
         self._remove_worktree(meta)
 
         meta.status = SessionStatus.DISCARDED
-        meta.completed_at = datetime.utcnow()
+        meta.completed_at = datetime.now(tz=timezone.utc)
         save_session(meta)
 
         append_audit(
             {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                 "event": "worktree_discarded",
                 "session_id": session_id,
             }
@@ -242,6 +242,6 @@ class WorktreeEngine:
             pass
 
     def _history_dir(self, project_root: Path, session_id: str) -> Path:
-        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
         slug = _slugify(session_id)
         return project_root / ".kote" / "history" / f"{timestamp}-{slug}"

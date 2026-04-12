@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -106,7 +106,7 @@ class SessionMeta(BaseModel):
     worktree_path: Path
     branch_name: str
     status: SessionStatus = SessionStatus.ACTIVE
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     completed_at: datetime | None = None
     plan_title: str = ""
     ide: IDEChoice = IDEChoice.AUTO
@@ -158,7 +158,7 @@ class ProjectInfo(BaseModel):
 class AuditEntry(BaseModel):
     """A single JSONL audit-log record."""
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     event: str
     session_id: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)
