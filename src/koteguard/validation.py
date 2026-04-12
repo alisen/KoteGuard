@@ -146,6 +146,8 @@ def validate_changes_against_plan(
     Compare actual changed files in the worktree against the tasks in PLAN.md.
 
     This is a heuristic check – it warns when changes seem out of scope.
+    Returns a ValidationResult where ``is_valid`` may still be True even when
+    warnings are present (warnings do not block acceptance, errors do).
     """
     result = ValidationResult()
 

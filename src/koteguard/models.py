@@ -146,6 +146,7 @@ class ProjectInfo(BaseModel):
     has_tests: bool = False
     has_ci: bool = False
     sub_projects: list[str] = Field(default_factory=list)
+    elapsed_ms: float = 0.0
 
     model_config = {"arbitrary_types_allowed": True}
 

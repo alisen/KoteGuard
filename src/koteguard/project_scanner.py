@@ -182,8 +182,8 @@ class ProjectScanner:
             info = self._enrich_flutter(info)
 
         elapsed = (time.monotonic() - t0) * 1000
-        # Target < 600 ms – just record, don't raise
-        _ = elapsed
+        # Target < 600 ms – logged for observability; no hard failure
+        info.elapsed_ms = elapsed
         return info
 
     # ------------------------------------------------------------------

@@ -133,6 +133,7 @@ class IDELauncher:
         elif bin_name == "xed":
             args.append(str(self.worktree_path))
 
+        # args is built from trusted, resolved paths – shell=False is correct here
         subprocess.Popen(  # noqa: S603
             args,
             start_new_session=True,

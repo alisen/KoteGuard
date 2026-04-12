@@ -108,10 +108,7 @@ class SensitiveFileHandler:
 
         patterns = _resolve_patterns(project_type)
         for pattern, stub_key in patterns.items():
-            if "*" in pattern:
-                matched = list(source_root.rglob(pattern))
-            else:
-                matched = list(source_root.rglob(pattern))
+            matched = list(source_root.rglob(pattern))
 
             for real_file in matched:
                 # Compute relative path, place stub in worktree

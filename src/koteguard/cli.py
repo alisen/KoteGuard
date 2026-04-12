@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from datetime import datetime
 from enum import Enum
@@ -213,8 +214,7 @@ def prep(
     console.print("  Wrote [green]PLAN.md[/] → worktree")
 
     # Write WORKSPACE.md into worktree
-    import shutil as _shutil
-    _shutil.copy2(workspace_path, Path(meta.worktree_path) / "WORKSPACE.md")
+    shutil.copy2(workspace_path, Path(meta.worktree_path) / "WORKSPACE.md")
 
     # Sensitive file stubs
     sfh = SensitiveFileHandler(Path(meta.worktree_path))
