@@ -16,6 +16,7 @@ from koteguard.config import (
     SESSIONS_DIR,
     WORKTREES_DIR,
     append_audit,
+    append_session_audit,
     load_global_config,
 )
 from koteguard.models import SessionMeta, SessionStatus
@@ -82,6 +83,7 @@ class WorktreeEngine:
         task_description: str = "agent-task",
         session_id: str | None = None,
         base_branch: str | None = None,
+        plan_title: str = "",
     ) -> SessionMeta:
         """
         Create a new git worktree for an agent session.
@@ -92,27 +94,23 @@ class WorktreeEngine:
         repo = self._get_repo()
         project_root = Path(repo.working_tree_dir)
 
-        # Generate IDs
         if not session_id:
             session_id = str(uuid.uuid4())[:8]
         timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
         project_slug = _slugify(project_root.name)
         branch_name = f"kote/{session_id}-{_slugify(task_description)[:30]}"
 
-        # Worktree path
         worktree_path = (
             Path(cfg.worktrees_dir) / project_slug / f"{session_id}-{timestamp}"
         )
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Determine base
         if base_branch is None:
             if repo.head.is_detached:
                 base_branch = "HEAD"
             else:
                 base_branch = repo.active_branch.name
 
-        # Create branch + worktree
         repo.git.worktree("add", "-b", branch_name, str(worktree_path), base_branch)
 
         meta = SessionMeta(
@@ -122,27 +120,55 @@ class WorktreeEngine:
             worktree_path=worktree_path,
             branch_name=branch_name,
             status=SessionStatus.ACTIVE,
+            plan_title=plan_title or task_description,
         )
         save_session(meta)
 
-        append_audit(
-            {
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                "event": "worktree_created",
-                "session_id": session_id,
-                "details": {
-                    "branch": branch_name,
-                    "worktree_path": str(worktree_path),
-                    "project_root": str(project_root),
-                },
-            }
-        )
+        # Create session subdirectory structure
+        self._create_session_dirs(session_id)
+
+        first_entry: dict[str, Any] = {
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "event": "session_created",
+            "session_id": session_id,
+            "details": {
+                "branch": branch_name,
+                "worktree_path": str(worktree_path),
+                "project_root": str(project_root),
+                "plan_title": plan_title,
+            },
+        }
+        append_session_audit(session_id, first_entry)
+
         return meta
 
-    def accept_worktree(self, session_id: str) -> bool:
+    def _create_session_dirs(self, session_id: str) -> None:
+        """Create context/, logs/, output/ subdirs for a session."""
+        for subdir in ("context", "logs", "output"):
+            (SESSIONS_DIR / session_id / subdir).mkdir(parents=True, exist_ok=True)
+
+    def copy_context_files(
+        self,
+        session_id: str,
+        files: dict[str, Path],
+    ) -> None:
+        """Copy plan/task/instruction files into sessions/{id}/context/."""
+        context_dir = SESSIONS_DIR / session_id / "context"
+        context_dir.mkdir(parents=True, exist_ok=True)
+        for dest_name, src_path in files.items():
+            if src_path.exists():
+                try:
+                    shutil.copy2(src_path, context_dir / dest_name)
+                except Exception:
+                    pass
+
+    def accept_worktree(
+        self,
+        session_id: str,
+        force: bool = False,
+    ) -> bool:
         """
-        Accept changes: copy modified files back to the project root,
-        record history, remove the worktree.
+        Accept changes: merge back to project root, archive history, remove worktree.
         """
         meta = load_session(session_id)
         if not meta:
@@ -151,24 +177,20 @@ class WorktreeEngine:
         worktree_path = Path(meta.worktree_path)
         project_root = Path(meta.project_root)
 
-        # Save to project history
         history_dir = self._history_dir(project_root, session_id)
         history_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy changed files (via git diff) to history for reference
+        # Generate and copy diff/patch
+        patch_content = ""
         try:
             repo = self._get_repo()
-            diff_output = repo.git.diff(
-                f"{meta.branch_name}...HEAD", "--name-only"
-            )
-            # Save patch
             try:
-                patch = repo.git.diff(f"HEAD...{meta.branch_name}")
-                (history_dir / "changes.patch").write_text(patch, encoding="utf-8")
+                patch_content = repo.git.diff(f"HEAD...{meta.branch_name}")
+                (history_dir / "changes.diff").write_text(patch_content, encoding="utf-8")
             except git.GitCommandError:
                 pass
 
-            # Merge branch into main
+            # Merge branch
             try:
                 repo.git.merge(
                     meta.branch_name,
@@ -177,24 +199,25 @@ class WorktreeEngine:
                     f"feat(kote/{session_id}): accept agent changes",
                 )
             except git.GitCommandError:
-                # If merge fails, just record and remove
                 pass
         except Exception:
             pass
 
+        # Archive context files to history
+        self._archive_accept(session_id, worktree_path, history_dir)
         self._remove_worktree(meta)
 
         meta.status = SessionStatus.COMPLETED
         meta.completed_at = datetime.now(tz=timezone.utc)
         save_session(meta)
 
-        append_audit(
-            {
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                "event": "worktree_accepted",
-                "session_id": session_id,
-            }
-        )
+        entry: dict[str, Any] = {
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "event": "worktree_accepted",
+            "session_id": session_id,
+            "details": {"history_dir": str(history_dir)},
+        }
+        append_session_audit(session_id, entry)
         return True
 
     def discard_worktree(self, session_id: str) -> bool:
@@ -203,20 +226,82 @@ class WorktreeEngine:
         if not meta:
             return False
 
+        worktree_path = Path(meta.worktree_path)
+        project_root = Path(meta.project_root)
+
+        # Archive audit trail on discard too
+        history_dir = self._history_dir(project_root, session_id)
+        self._archive_discard(session_id, history_dir)
+
         self._remove_worktree(meta)
 
         meta.status = SessionStatus.DISCARDED
         meta.completed_at = datetime.now(tz=timezone.utc)
         save_session(meta)
 
-        append_audit(
-            {
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                "event": "worktree_discarded",
-                "session_id": session_id,
-            }
-        )
+        entry: dict[str, Any] = {
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "event": "worktree_discarded",
+            "session_id": session_id,
+        }
+        append_session_audit(session_id, entry)
         return True
+
+    def _archive_accept(
+        self,
+        session_id: str,
+        worktree_path: Path,
+        history_dir: Path,
+    ) -> None:
+        """Copy PLAN.md, TASK.md, audit.jsonl, validation-report.md to history."""
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        # Files from worktree
+        for fname in ("PLAN.md", "TASK.md"):
+            src = worktree_path / fname
+            if src.exists():
+                try:
+                    shutil.copy2(src, history_dir / fname)
+                except Exception:
+                    pass
+
+        # Per-session audit log
+        from koteguard.config import SESSIONS_DIR as _SESSIONS_DIR
+        audit_src = _SESSIONS_DIR / session_id / "logs" / "audit.jsonl"
+        if audit_src.exists():
+            try:
+                shutil.copy2(audit_src, history_dir / "audit.jsonl")
+            except Exception:
+                pass
+
+        # Validation report (if generated)
+        report_src = _SESSIONS_DIR / session_id / "output" / "validation-report.md"
+        if report_src.exists():
+            try:
+                shutil.copy2(report_src, history_dir / "validation-report.md")
+            except Exception:
+                pass
+
+    def _archive_discard(self, session_id: str, history_dir: Path) -> None:
+        """On discard: copy PLAN.md + audit.jsonl only."""
+        from koteguard.config import SESSIONS_DIR as _SESSIONS_DIR, WORKTREES_DIR as _WORKTREES_DIR
+
+        history_dir.mkdir(parents=True, exist_ok=True)
+
+        # Try to get PLAN.md from the session context
+        plan_src = _SESSIONS_DIR / session_id / "context" / "PLAN.md"
+        if plan_src.exists():
+            try:
+                shutil.copy2(plan_src, history_dir / "PLAN.md")
+            except Exception:
+                pass
+
+        audit_src = _SESSIONS_DIR / session_id / "logs" / "audit.jsonl"
+        if audit_src.exists():
+            try:
+                shutil.copy2(audit_src, history_dir / "audit.jsonl")
+            except Exception:
+                pass
 
     def _remove_worktree(self, meta: SessionMeta) -> None:
         """Prune worktree and delete branch."""
@@ -225,7 +310,6 @@ class WorktreeEngine:
             repo = self._get_repo()
             repo.git.worktree("remove", "--force", str(worktree_path))
         except Exception:
-            # Fallback: manual removal
             if worktree_path.exists():
                 shutil.rmtree(worktree_path, ignore_errors=True)
             try:
@@ -234,7 +318,6 @@ class WorktreeEngine:
             except Exception:
                 pass
 
-        # Delete the branch
         try:
             repo = self._get_repo()
             repo.git.branch("-D", meta.branch_name)

@@ -39,8 +39,15 @@ _ANDROID_STUDIO_PATHS = [
 ]
 
 _XCODE_BINARY_NAMES = ["xed"]
-
 _XCODE_PATHS = ["/Applications/Xcode.app/Contents/MacOS/Xcode"]
+
+# Deny-list for Copilot CLI security
+_DENY_TOOLS = [
+    "shell(git push)",
+    "shell(git remote add)",
+    "shell(git remote set-url)",
+    "shell(git clone)",
+]
 
 
 def detect_android_studio() -> str | None:
@@ -51,7 +58,6 @@ def detect_android_studio() -> str | None:
     for path_str in _ANDROID_STUDIO_PATHS:
         if Path(path_str).is_file():
             return path_str
-    # macOS: check open -a
     if platform.system() == "Darwin":
         try:
             result = subprocess.run(
@@ -82,8 +88,6 @@ def detect_xcode() -> str | None:
 def pick_ide(ide_choice: IDEChoice, worktree_path: Path) -> str | None:
     """
     Determine the IDE binary to launch based on user preference and detection.
-
-    Returns a binary path or None if nothing appropriate was found.
     """
     choice = ide_choice if isinstance(ide_choice, str) else ide_choice.value
 
@@ -92,23 +96,42 @@ def pick_ide(ide_choice: IDEChoice, worktree_path: Path) -> str | None:
     if choice == "ios":
         return detect_xcode()
 
-    # AUTO: detect based on what's available + what's in the worktree
     android_binary = detect_android_studio()
     xcode_binary = detect_xcode()
 
     has_gradle = any(worktree_path.rglob("build.gradle*"))
-    has_xcode = any(
-        p
-        for p in worktree_path.iterdir()
-        if p.suffix in (".xcodeproj", ".xcworkspace")
-    ) if worktree_path.exists() else False
+    has_xcode = (
+        any(
+            p
+            for p in worktree_path.iterdir()
+            if p.suffix in (".xcodeproj", ".xcworkspace")
+        )
+        if worktree_path.exists()
+        else False
+    )
 
     if has_gradle and android_binary:
         return android_binary
     if has_xcode and xcode_binary:
         return xcode_binary
-    # Fallback: whatever is available
     return android_binary or xcode_binary
+
+
+def build_copilot_cli_command(worktree_path: Path) -> str:
+    """
+    Build a complete, copy-pasteable Copilot CLI command with deny-tool flags
+    and COPILOT_CUSTOM_INSTRUCTIONS_DIRS env var.
+
+    Returns the full command string.
+    """
+    deny_flags = " ".join(f"--deny-tool='{tool}'" for tool in _DENY_TOOLS)
+    instructions_dir = ".github/instructions"
+
+    return (
+        f"cd {worktree_path} && "
+        f'COPILOT_CUSTOM_INSTRUCTIONS_DIRS="{instructions_dir}" '
+        f"copilot {deny_flags}"
+    )
 
 
 class IDELauncher:
@@ -124,16 +147,12 @@ class IDELauncher:
             return False
 
         args = [binary]
-
-        # Android Studio accepts the project directory as argument
         bin_name = Path(binary).name.lower()
         if "studio" in bin_name or "android" in bin_name:
             args.append(str(self.worktree_path))
-        # xed: pass the directory (Xcode will open the .xcodeproj inside)
         elif bin_name == "xed":
             args.append(str(self.worktree_path))
 
-        # args is built from trusted, resolved paths – shell=False is correct here
         subprocess.Popen(  # noqa: S603
             args,
             start_new_session=True,
@@ -143,13 +162,17 @@ class IDELauncher:
         return True
 
     def open_terminal(self) -> bool:
-        """Open a terminal at the worktree path."""
+        """Open a terminal at the worktree path with COPILOT_CUSTOM_INSTRUCTIONS_DIRS set."""
         system = platform.system()
+        env = os.environ.copy()
+        env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = ".github/instructions"
+
         try:
             if system == "Darwin":
                 subprocess.Popen(  # noqa: S603
                     ["open", "-a", "Terminal", str(self.worktree_path)],
                     start_new_session=True,
+                    env=env,
                 )
             elif system == "Linux":
                 for term in ("gnome-terminal", "xterm", "konsole", "xfce4-terminal"):
@@ -157,12 +180,14 @@ class IDELauncher:
                         subprocess.Popen(  # noqa: S603
                             [term, "--working-directory", str(self.worktree_path)],
                             start_new_session=True,
+                            env=env,
                         )
                         break
             elif system == "Windows":
                 subprocess.Popen(  # noqa: S603
                     ["cmd", "/c", "start", "cmd", "/k", f"cd /d {self.worktree_path}"],
                     start_new_session=True,
+                    env=env,
                 )
             return True
         except Exception:

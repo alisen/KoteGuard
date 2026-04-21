@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from koteguard.models import (
+    AndroidSkillRef,
     AuditEntry,
     GlobalConfig,
     IDEChoice,
@@ -15,7 +16,9 @@ from koteguard.models import (
     ProjectType,
     SessionMeta,
     SessionStatus,
+    SkillsComplianceResult,
     TaskModel,
+    UsedSkill,
     WorkspaceModel,
 )
 
@@ -111,6 +114,25 @@ class TestPlanModel:
         )
         assert p.estimated_time == "unknown"
 
+    def test_android_skills_default_empty(self):
+        p = PlanModel(
+            title="t",
+            objectives=["o"],
+            tasks=["t"],
+            definition_of_done=["d"],
+        )
+        assert p.android_skills == []
+
+    def test_android_skills_populated(self):
+        p = PlanModel(
+            title="t",
+            objectives=["o"],
+            tasks=["t"],
+            definition_of_done=["d"],
+            android_skills=["navigation3", "edge-to-edge"],
+        )
+        assert "navigation3" in p.android_skills
+
 
 # ---------------------------------------------------------------------------
 # WorkspaceModel
@@ -136,6 +158,18 @@ class TestWorkspaceModel:
         assert ws.conventions == []
         assert ws.structure == {}
         assert ws.gotchas == []
+        assert ws.android_agent_stack == {}
+
+    def test_android_agent_stack(self):
+        ws = WorkspaceModel(
+            project_name="App",
+            tech_stack=["Kotlin"],
+            android_agent_stack={
+                "cli_version": "available",
+                "enabled_skills": ["navigation3"],
+            },
+        )
+        assert ws.android_agent_stack["cli_version"] == "available"
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +183,9 @@ class TestProjectInfo:
         assert pi.project_type == ProjectType.UNKNOWN
         assert pi.confidence == 0.0
         assert pi.languages == []
+        assert pi.android_cli_available is False
+        assert pi.detected_skills == []
+        assert pi.doc_summary == {}
 
     def test_confidence_bounds(self):
         with pytest.raises(ValidationError):
@@ -163,6 +200,17 @@ class TestProjectInfo:
             android_min_sdk=21,
         )
         assert pi.android_min_sdk == 21
+
+    def test_no_flutter_rn_type(self):
+        """Flutter and React Native should not exist as ProjectTypes."""
+        valid_types = [pt.value for pt in ProjectType]
+        assert "flutter" not in valid_types
+        assert "react_native" not in valid_types
+
+    def test_android_cli_available_field(self):
+        pi = ProjectInfo(android_cli_available=True, detected_skills=["navigation3"])
+        assert pi.android_cli_available is True
+        assert "navigation3" in pi.detected_skills
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +229,8 @@ class TestSessionMeta:
         )
         assert meta.status == "active"
         assert meta.completed_at is None
+        assert meta.plan_title == ""
+        assert meta.android_cli_available is False
 
     def test_status_enum_values(self, tmp_path):
         meta = SessionMeta(
@@ -193,6 +243,28 @@ class TestSessionMeta:
         )
         assert meta.status == "completed"
 
+    def test_plan_title_field(self, tmp_path):
+        meta = SessionMeta(
+            session_id="sess-03",
+            project_slug="p",
+            project_root=tmp_path,
+            worktree_path=tmp_path,
+            branch_name="b",
+            plan_title="Add login screen",
+        )
+        assert meta.plan_title == "Add login screen"
+
+    def test_skills_loaded_field(self, tmp_path):
+        meta = SessionMeta(
+            session_id="sess-04",
+            project_slug="p",
+            project_root=tmp_path,
+            worktree_path=tmp_path,
+            branch_name="b",
+            skills_loaded=["navigation3", "edge-to-edge"],
+        )
+        assert len(meta.skills_loaded) == 2
+
 
 # ---------------------------------------------------------------------------
 # GlobalConfig / ProjectLocalConfig
@@ -204,6 +276,8 @@ class TestGlobalConfig:
         cfg = GlobalConfig()
         assert cfg.default_ide == "auto"
         assert cfg.auto_open_ide is True
+        assert cfg.android_cli_version == ""
+        assert cfg.skills_repo_url == "https://github.com/android/skills"
 
     def test_ide_choice(self):
         cfg = GlobalConfig(default_ide=IDEChoice.ANDROID_STUDIO)
@@ -235,3 +309,53 @@ class TestAuditEntry:
             details={"branch": "kote/xyz-task"},
         )
         assert e.details["branch"] == "kote/xyz-task"
+
+
+# ---------------------------------------------------------------------------
+# Android Skills models (v1.1)
+# ---------------------------------------------------------------------------
+
+
+class TestAndroidSkillRef:
+    def test_valid(self):
+        skill = AndroidSkillRef(
+            name="navigation3",
+            url="https://developer.android.com/guide/navigation",
+        )
+        assert skill.name == "navigation3"
+        assert skill.enabled is True
+        assert skill.description == ""
+
+    def test_disabled_skill(self):
+        skill = AndroidSkillRef(
+            name="agp9",
+            url="https://example.com",
+            enabled=False,
+            description="AGP 9 migration",
+        )
+        assert skill.enabled is False
+
+
+class TestUsedSkill:
+    def test_valid(self):
+        skill = UsedSkill(skill_name="navigation3", applied_to="HomeFragment.kt")
+        assert skill.skill_name == "navigation3"
+        assert skill.applied_to == "HomeFragment.kt"
+        assert skill.timestamp is not None
+
+
+class TestSkillsComplianceResult:
+    def test_compliant(self):
+        result = SkillsComplianceResult(compliant=True)
+        assert result.compliant is True
+        assert result.missing_skills == []
+        assert result.suggestions == []
+
+    def test_non_compliant(self):
+        result = SkillsComplianceResult(
+            compliant=False,
+            missing_skills=["navigation3"],
+            suggestions=["Add navigation3 to android_skills in PLAN.md"],
+        )
+        assert result.compliant is False
+        assert len(result.missing_skills) == 1

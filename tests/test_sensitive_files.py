@@ -1,4 +1,4 @@
-"""Tests for the sensitive file handler."""
+"""Tests for the sensitive file handler – Android + iOS only (no Flutter/RN)."""
 
 from __future__ import annotations
 
@@ -53,10 +53,15 @@ class TestResolvePatterns:
         assert "*.jks" in patterns
         assert "*.p12" in patterns
 
-    def test_flutter(self):
+    def test_no_flutter_patterns(self):
+        """Flutter should not resolve any patterns (type removed)."""
         patterns = _resolve_patterns("flutter")
-        assert "*.jks" in patterns
-        assert "*.p12" in patterns
+        assert patterns == {}
+
+    def test_no_react_native_patterns(self):
+        """React Native should not resolve any patterns (type removed)."""
+        patterns = _resolve_patterns("react_native")
+        assert patterns == {}
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +87,6 @@ class TestSensitiveFileHandler:
         assert handler.is_stub(real) is False
 
     def test_inject_stubs_google_services(self, tmp_path):
-        # Create a fake source root with google-services.json
         source = tmp_path / "source"
         _write(source / "app" / "google-services.json", '{"real": true}')
 
@@ -119,7 +123,7 @@ class TestSensitiveFileHandler:
         created2 = handler.inject_stubs("android", source_root=source)
 
         assert len(created1) == 1
-        assert len(created2) == 0  # Already exists
+        assert len(created2) == 0
 
     def test_google_service_info_plist_stub(self, tmp_path):
         source = tmp_path / "source"
@@ -139,3 +143,15 @@ class TestSensitiveFileHandler:
         content = stub.read_text()
         assert "KoteGuard STUB" in content
         assert "sdk.dir" in content
+
+    def test_android_and_ios_in_monorepo(self, tmp_path):
+        source = tmp_path / "source"
+        _write(source / "app" / "google-services.json", '{"real": true}')
+        _write(source / "GoogleService-Info.plist", "<plist>real</plist>")
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+
+        handler = SensitiveFileHandler(worktree)
+        created = handler.inject_stubs("monorepo", source_root=source)
+        assert len(created) == 2

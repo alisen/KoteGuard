@@ -1,4 +1,4 @@
-"""Tests for the project scanner (Phase 0)."""
+"""Tests for the project scanner (Phase 0) – Android + iOS only."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from koteguard.project_scanner import (
     ProjectScanner,
     _parse_build_gradle,
     _parse_info_plist,
-    _parse_pubspec,
 )
 
 
@@ -38,11 +37,11 @@ class TestAndroidProject:
             tmp_path / "app" / "build.gradle",
             """
 android {
-    compileSdkVersion 34
+    compileSdk 34
     defaultConfig {
         applicationId "com.example.myapp"
-        minSdkVersion 21
-        targetSdkVersion 34
+        minSdk 21
+        targetSdk 34
     }
 }
 """,
@@ -56,7 +55,7 @@ android {
     def test_android_enrichment(self, tmp_path):
         _write(
             tmp_path / "app" / "build.gradle",
-            'applicationId "com.test.app"\nminSdkVersion 24\ntargetSdkVersion 33\ncompileSdkVersion 33\n',
+            'applicationId "com.test.app"\nminSdk 24\ntargetSdk 33\ncompileSdk 33\n',
         )
         _write(tmp_path / "build.gradle", "")
         scanner = ProjectScanner(tmp_path)
@@ -79,6 +78,27 @@ android {
         scanner = ProjectScanner(tmp_path)
         info = scanner.scan()
         assert info.has_ci is True
+
+    def test_no_flutter_detected(self, tmp_path):
+        """Flutter pubspec.yaml should NOT cause FLUTTER type – that type is removed."""
+        _write(tmp_path / "pubspec.yaml", "name: my_flutter_app\n")
+        scanner = ProjectScanner(tmp_path)
+        info = scanner.scan()
+        # Should be UNKNOWN (not FLUTTER)
+        assert info.project_type == ProjectType.UNKNOWN
+
+    def test_skill_detection_from_gradle(self, tmp_path):
+        _write(tmp_path / "build.gradle", "")
+        _write(
+            tmp_path / "app" / "build.gradle",
+            "implementation 'androidx.navigation:navigation-compose:2.8.0'\n"
+            "implementation 'androidx.compose.ui:ui:1.7.0'\n",
+        )
+        scanner = ProjectScanner(tmp_path)
+        skills = scanner._scan_for_skills()
+        # "androidx.navigation" keyword matches navigation3; "androidx.compose" matches compose-migration
+        assert "navigation3" in skills
+        assert "compose-migration" in skills
 
 
 # ---------------------------------------------------------------------------
@@ -115,31 +135,13 @@ class TestIOSProject:
         assert info.ios_bundle_id == "com.example.iosapp"
         assert info.ios_deployment_target == "15.0"
 
-
-# ---------------------------------------------------------------------------
-# Flutter project
-# ---------------------------------------------------------------------------
-
-
-class TestFlutterProject:
-    def test_detects_flutter(self, tmp_path):
-        _write(
-            tmp_path / "pubspec.yaml",
-            "name: my_flutter_app\nflutter:\n  sdk: flutter\n",
-        )
+    def test_no_flutter_field(self, tmp_path):
+        """ProjectInfo should not have flutter_sdk field."""
+        xcodeproj = tmp_path / "MyApp.xcodeproj"
+        xcodeproj.mkdir()
         scanner = ProjectScanner(tmp_path)
         info = scanner.scan()
-        assert info.project_type == ProjectType.FLUTTER
-        assert info.confidence >= 0.9
-
-    def test_flutter_project_name(self, tmp_path):
-        _write(
-            tmp_path / "pubspec.yaml",
-            "name: cool_app\ndescription: A Flutter app\n",
-        )
-        scanner = ProjectScanner(tmp_path)
-        info = scanner.scan()
-        assert info.project_name == "cool_app"
+        assert not hasattr(info, "flutter_sdk")
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +156,96 @@ class TestUnknownProject:
         info = scanner.scan()
         assert info.project_type == ProjectType.UNKNOWN
         assert info.confidence == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Documentation analysis
+# ---------------------------------------------------------------------------
+
+
+class TestDocAnalysis:
+    def test_readme_headers_extracted(self, tmp_path):
+        _write(
+            tmp_path / "README.md",
+            "# My App\n\n## Architecture\n\nMVVM with Clean Architecture\n\n## Setup\n\nRun `./gradlew build`\n",
+        )
+        scanner = ProjectScanner(tmp_path)
+        doc_summary = scanner._analyze_documentation()
+        assert "README.md" in doc_summary
+        headers = doc_summary["README.md"]
+        assert any("Architecture" in h for h in headers)
+
+    def test_architecture_keywords_detected(self, tmp_path):
+        _write(
+            tmp_path / "ARCHITECTURE.md",
+            "# Architecture\n\nThis project uses MVVM with Clean architecture and Compose.\n",
+        )
+        scanner = ProjectScanner(tmp_path)
+        doc_summary = scanner._analyze_documentation()
+        assert "ARCHITECTURE.md" in doc_summary
+        headers = doc_summary["ARCHITECTURE.md"]
+        kw_entries = [h for h in headers if h.startswith("[keyword:")]
+        assert any("mvvm" in kw or "clean" in kw or "compose" in kw for kw in kw_entries)
+
+    def test_missing_docs_returns_empty(self, tmp_path):
+        scanner = ProjectScanner(tmp_path)
+        doc_summary = scanner._analyze_documentation()
+        assert isinstance(doc_summary, dict)
+
+
+# ---------------------------------------------------------------------------
+# Android CLI detection
+# ---------------------------------------------------------------------------
+
+
+class TestAndroidCLIDetection:
+    def test_no_android_cli(self, tmp_path):
+        """In a clean test env with no android binary, should return False."""
+        import shutil
+        from unittest.mock import patch
+
+        scanner = ProjectScanner(tmp_path)
+        # Mock out shutil.which to return None and Path.exists to return False
+        with patch("koteguard.project_scanner.shutil.which", return_value=None), \
+             patch("pathlib.Path.exists", return_value=False):
+            result = scanner._detect_android_cli()
+        assert result is False
+
+    def test_android_cli_via_which(self, tmp_path):
+        from unittest.mock import patch
+
+        scanner = ProjectScanner(tmp_path)
+        with patch("koteguard.project_scanner.shutil.which", return_value="/usr/local/bin/android"):
+            result = scanner._detect_android_cli()
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Skills suggestion
+# ---------------------------------------------------------------------------
+
+
+class TestSkillsSuggestion:
+    def test_suggest_compose_for_compose_project(self, tmp_path):
+        _write(tmp_path / "build.gradle", "")
+        info_with_compose = __import__("koteguard.models", fromlist=["ProjectInfo"]).ProjectInfo(
+            project_type=ProjectType.ANDROID,
+            frameworks=["Android SDK", "Jetpack Compose"],
+            detected_skills=[],
+        )
+        scanner = ProjectScanner(tmp_path)
+        suggestions = scanner._suggest_skills(info_with_compose)
+        assert "compose-migration" in suggestions
+
+    def test_no_suggestions_for_ios(self, tmp_path):
+        info_ios = __import__("koteguard.models", fromlist=["ProjectInfo"]).ProjectInfo(
+            project_type=ProjectType.IOS,
+            frameworks=["UIKit/SwiftUI"],
+            detected_skills=[],
+        )
+        scanner = ProjectScanner(tmp_path)
+        suggestions = scanner._suggest_skills(info_ios)
+        assert suggestions == []
 
 
 # ---------------------------------------------------------------------------
@@ -180,20 +272,4 @@ class TestParseBuildGradle:
 
     def test_nonexistent_file(self, tmp_path):
         result = _parse_build_gradle(tmp_path / "missing.gradle")
-        assert result == {}
-
-
-# ---------------------------------------------------------------------------
-# parse_pubspec
-# ---------------------------------------------------------------------------
-
-
-class TestParsePubspec:
-    def test_parses_name(self, tmp_path):
-        f = _write(tmp_path / "pubspec.yaml", "name: my_app\n")
-        result = _parse_pubspec(f)
-        assert result["project_name"] == "my_app"
-
-    def test_missing_file(self, tmp_path):
-        result = _parse_pubspec(tmp_path / "missing.yaml")
         assert result == {}

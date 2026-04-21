@@ -50,6 +50,18 @@ def render_plan(plan: PlanModel) -> str:
     lines.append(f"## Estimated Time\n\n{plan.estimated_time}\n")
     if plan.risks:
         lines.append(_h2("Risks", plan.risks))
+    if plan.android_skills:
+        lines.append(_h2("Android Skills", plan.android_skills))
+
+    # Token & Context Rules section
+    lines.append(
+        "## Token & Context Rules (enforced by KoteGuard)\n\n"
+        "- Batch all subtasks into ONE TASK.md (do not send multiple messages)\n"
+        "- Use EDIT on this PLAN.md instead of follow-up messages\n"
+        "- Choose model explicitly: fast/haiku for drafts, sonnet/full for real work\n"
+        "- Prefer short, focused sessions — Copilot CLI auto-compacts at ~80% context window\n"
+        "- After session: summarize key decisions back to WORKSPACE.md via kote cleanup --compact\n"
+    )
 
     return "\n".join(lines)
 
@@ -70,7 +82,6 @@ def parse_plan(markdown: str) -> PlanModel:
         items: list[str] = []
         for line in block.splitlines():
             line = line.strip()
-            # Bullet or numbered list
             m2 = re.match(r"^[-*•]\s+(.+)$", line)
             if m2:
                 items.append(m2.group(1))
@@ -95,6 +106,7 @@ def parse_plan(markdown: str) -> PlanModel:
         or ["(none)"],
         estimated_time=_extract_section_text(markdown, "Estimated Time") or "unknown",
         risks=_extract_section_list(markdown, "Risks"),
+        android_skills=_extract_section_list(markdown, "Android Skills"),
     )
 
 
@@ -129,6 +141,20 @@ def render_workspace(ws: WorkspaceModel) -> str:
     if ws.gotchas:
         lines.append(_h2("Gotchas / Watch-outs", ws.gotchas))
 
+    # Android Agent Stack section (v1.1)
+    if ws.android_agent_stack:
+        stack = ws.android_agent_stack
+        lines.append("## Android Agent Stack\n")
+        if stack.get("cli_version"):
+            lines.append(f"- **Android CLI version:** {stack['cli_version']}")
+        if stack.get("kb_status"):
+            lines.append(f"- **Knowledge Base:** {stack['kb_status']}")
+        if stack.get("enabled_skills"):
+            lines.append("- **Enabled Skills:**")
+            for skill in stack["enabled_skills"]:
+                lines.append(f"  - {skill}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -144,6 +170,7 @@ def workspace_from_project_info(info: ProjectInfo) -> WorkspaceModel:
     gotchas: list[str] = []
     structure: dict[str, str] = {}
     conventions: list[str] = []
+    android_agent_stack: dict[str, Any] = {}
 
     pt = info.project_type.value
     if pt == "android":
@@ -161,6 +188,28 @@ def workspace_from_project_info(info: ProjectInfo) -> WorkspaceModel:
         if info.android_min_sdk:
             conventions.append(f"Min SDK: {info.android_min_sdk}")
 
+        # Populate Android agent stack
+        android_agent_stack = {
+            "cli_version": "available" if info.android_cli_available else "not detected",
+            "kb_status": info.knowledge_base_status,
+            "enabled_skills": info.detected_skills,
+        }
+
+        # Add doc summary findings to architecture
+        if info.doc_summary:
+            arch_findings: list[str] = []
+            for _doc, headers in info.doc_summary.items():
+                kw_found = [
+                    h.replace("[keyword:", "").rstrip("]")
+                    for h in headers
+                    if h.startswith("[keyword:")
+                ]
+                if kw_found:
+                    arch_findings.extend(kw_found)
+            if arch_findings:
+                unique_kw = list(dict.fromkeys(arch_findings))
+                architecture += f" Detected architecture patterns: {', '.join(unique_kw[:5])}."
+
     elif pt == "ios":
         architecture = (
             "iOS application. "
@@ -172,19 +221,6 @@ def workspace_from_project_info(info: ProjectInfo) -> WorkspaceModel:
         gotchas.append("GoogleService-Info.plist contains sensitive Firebase config")
         conventions = ["Follow Swift API Design Guidelines", "Prefer async/await for concurrency"]
 
-    elif pt == "flutter":
-        architecture = "Flutter cross-platform application."
-        structure["lib/"] = "Dart application code"
-        structure["pubspec.yaml"] = "Dependencies and project metadata"
-        if info.flutter_sdk:
-            conventions.append(f"Flutter SDK: >={info.flutter_sdk}")
-        gotchas.append("Run `flutter pub get` after changing pubspec.yaml")
-
-    elif pt == "react_native":
-        architecture = "React Native cross-platform application."
-        structure["src/"] = "Application source code"
-        gotchas.append("Never commit .env files with API keys")
-
     if info.has_ci:
         conventions.append("CI is configured – ensure tests pass before merging")
 
@@ -195,6 +231,7 @@ def workspace_from_project_info(info: ProjectInfo) -> WorkspaceModel:
         conventions=conventions,
         structure=structure,
         gotchas=gotchas,
+        android_agent_stack=android_agent_stack,
     )
 
 
@@ -211,6 +248,25 @@ def render_copilot_instructions(
     """Generate .github/copilot-instructions.md content."""
     tasks_md = "\n".join(f"{i}. {t}" for i, t in enumerate(plan.tasks, 1))
     dod_md = "\n".join(f"- {d}" for d in plan.definition_of_done)
+
+    android_section = ""
+    if workspace.android_agent_stack:
+        stack = workspace.android_agent_stack
+        skills = stack.get("enabled_skills", [])
+        android_section = f"""
+## Android Agent Stack
+
+- **CLI Available:** {stack.get('cli_version', 'unknown')}
+- **Knowledge Base:** {stack.get('kb_status', 'unknown')}
+
+### Best Practices
+
+- Always use `android` CLI commands for emulator and device management within the worktree
+- Reference enabled skills when implementing features: {', '.join(skills) if skills else 'none detected'}
+- Prefer Jetpack Compose patterns where applicable
+- Use Android-specific coroutine dispatchers (Dispatchers.IO for I/O, Dispatchers.Main for UI)
+"""
+
     return f"""\
 # Copilot Agent Instructions (KoteGuard Session: {session_id})
 
@@ -238,6 +294,12 @@ def render_copilot_instructions(
 - Do NOT access the internet except to install declared dependencies.
 - Keep commits small and well-described.
 
+## Token & Context Discipline
+
+- Batch all sub-tasks into a single response where possible
+- Use fast/haiku models for drafts, full models for real implementation
+- Sessions auto-compact at ~80% context window
+{android_section}
 ## Estimated Time
 
 {plan.estimated_time}
@@ -249,16 +311,21 @@ def render_security_instructions(project_type: str = "unknown") -> str:
     android_section = ""
     ios_section = ""
 
-    if project_type in ("android", "monorepo", "flutter", "react_native", "unknown"):
+    if project_type in ("android", "monorepo", "unknown"):
         android_section = """
 ### Android
 
 - NEVER read, copy, or output contents of: `*.jks`, `*.keystore`, `google-services.json`
 - `local.properties` must never be committed
 - Do not add signing config with hardcoded passwords
+
+### Android CLI Commands
+
+**Allowed:** `android list avd`, `android list targets`, `android list sdk`
+**Forbidden (outside worktree):** `android run`, `android emulator` – only valid inside a kote worktree
 """
 
-    if project_type in ("ios", "monorepo", "flutter", "react_native", "unknown"):
+    if project_type in ("ios", "monorepo", "unknown"):
         ios_section = """
 ### iOS
 
@@ -268,7 +335,7 @@ def render_security_instructions(project_type: str = "unknown") -> str:
 
     return f"""\
 ---
-applyTo: "**"
+applyTo: "**/*"
 ---
 
 # Security Instructions (KoteGuard)
@@ -292,5 +359,6 @@ applyTo: "**"
 
 - `git push` – forbidden without human review
 - `git remote add` – forbidden
+- `git remote set-url` – forbidden
 - `git clone` – forbidden inside worktree
 """

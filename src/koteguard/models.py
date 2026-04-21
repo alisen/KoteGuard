@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -19,8 +19,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class ProjectType(str, Enum):
     ANDROID = "android"
     IOS = "ios"
-    FLUTTER = "flutter"
-    REACT_NATIVE = "react_native"
     MONOREPO = "monorepo"
     UNKNOWN = "unknown"
 
@@ -72,6 +70,7 @@ class PlanModel(BaseModel):
     definition_of_done: list[str] = Field(..., min_length=1)
     estimated_time: str = Field(default="unknown")
     risks: list[str] = Field(default_factory=list)
+    android_skills: list[str] = Field(default_factory=list)
 
     @field_validator("objectives", "tasks", "definition_of_done", mode="before")
     @classmethod
@@ -90,6 +89,7 @@ class WorkspaceModel(BaseModel):
     conventions: list[str] = Field(default_factory=list)
     structure: dict[str, str] = Field(default_factory=dict)
     gotchas: list[str] = Field(default_factory=list)
+    android_agent_stack: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +110,8 @@ class SessionMeta(BaseModel):
     completed_at: datetime | None = None
     plan_title: str = ""
     ide: IDEChoice = IDEChoice.AUTO
+    android_cli_available: bool = False
+    skills_loaded: list[str] = Field(default_factory=list)
 
     model_config = {"use_enum_values": True}
 
@@ -137,9 +139,6 @@ class ProjectInfo(BaseModel):
     ios_bundle_id: str | None = None
     ios_deployment_target: str | None = None
 
-    # Flutter-specific
-    flutter_sdk: str | None = None
-
     # General
     languages: list[str] = Field(default_factory=list)
     frameworks: list[str] = Field(default_factory=list)
@@ -148,7 +147,43 @@ class ProjectInfo(BaseModel):
     sub_projects: list[str] = Field(default_factory=list)
     elapsed_ms: float = 0.0
 
+    # Android v1.1 additions
+    android_cli_available: bool = False
+    detected_skills: list[str] = Field(default_factory=list)
+    knowledge_base_status: str = "unknown"
+    doc_summary: dict[str, list[str]] = Field(default_factory=dict)
+
     model_config = {"arbitrary_types_allowed": True}
+
+
+# ---------------------------------------------------------------------------
+# Android Skills models (v1.1)
+# ---------------------------------------------------------------------------
+
+
+class AndroidSkillRef(BaseModel):
+    """Reference to an Android agent skill."""
+
+    name: str
+    url: str
+    enabled: bool = True
+    description: str = ""
+
+
+class UsedSkill(BaseModel):
+    """Records a skill that was applied during a session."""
+
+    skill_name: str
+    applied_to: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+
+
+class SkillsComplianceResult(BaseModel):
+    """Result of a skills compliance check."""
+
+    compliant: bool
+    missing_skills: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +221,8 @@ class GlobalConfig(BaseModel):
         default_factory=lambda: Path.home() / ".kote" / "audit.jsonl"
     )
     auto_open_ide: bool = True
+    android_cli_version: str = ""
+    skills_repo_url: str = "https://github.com/android/skills"
 
     model_config = {"arbitrary_types_allowed": True, "use_enum_values": True}
 

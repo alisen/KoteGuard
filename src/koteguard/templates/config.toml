@@ -1,0 +1,8 @@
+# KoteGuard global configuration (~/.kote/config.toml)
+default_ide = "auto"
+auto_open_ide = true
+worktrees_dir = "~/.kote/worktrees"
+sessions_dir = "~/.kote/sessions"
+audit_log = "~/.kote/audit.jsonl"
+android_cli_version = ""
+skills_repo_url = "https://github.com/android/skills"

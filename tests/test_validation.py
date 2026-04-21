@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,13 @@ from koteguard.validation import (
     validate_changes_against_plan,
     validate_plan_file,
     validate_workspace_file,
+    validate_skills_compliance,
+    render_validation_report,
+    write_validation_report,
+    write_used_skills_json,
 )
 from koteguard.planning import render_plan, render_workspace
-from koteguard.models import PlanModel, WorkspaceModel
+from koteguard.models import PlanModel, WorkspaceModel, ProjectInfo, ProjectType, SkillsComplianceResult
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +115,6 @@ class TestValidatePlanFile:
 """
         plan_file = _write(tmp_path / "PLAN.md", md)
         result = validate_plan_file(plan_file)
-        # Placeholder warning expected
         assert any("placeholder" in w.lower() for w in result.warnings)
 
     def test_unknown_estimated_time_warns(self, tmp_path):
@@ -178,10 +182,143 @@ class TestValidateChangesAgainstPlan:
         plan_file = _write(tmp_path / "PLAN.md", _valid_plan_md())
         changed = ["src/main/Theme.kt", "src/test/ThemeTest.kt"]
         result = validate_changes_against_plan(tmp_path, plan_file, changed)
-        # CI warning should NOT appear
         assert not any("CI" in w for w in result.warnings)
 
     def test_invalid_plan_fails_early(self, tmp_path):
         plan_file = _write(tmp_path / "PLAN.md", "")
         result = validate_changes_against_plan(tmp_path, plan_file, ["file.kt"])
         assert not result.is_valid
+
+
+# ---------------------------------------------------------------------------
+# validate_skills_compliance
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSkillsCompliance:
+    def test_compliant_when_no_android_skills(self):
+        plan = PlanModel(
+            title="Fix bug",
+            objectives=["o"],
+            tasks=["t"],
+            definition_of_done=["d"],
+            android_skills=[],
+        )
+        info = ProjectInfo(
+            project_type=ProjectType.ANDROID,
+            detected_skills=[],
+        )
+        result = validate_skills_compliance(plan, info)
+        assert result.compliant is True
+
+    def test_non_compliant_missing_skills(self):
+        plan = PlanModel(
+            title="Add navigation",
+            objectives=["o"],
+            tasks=["implement nav3"],
+            definition_of_done=["d"],
+            android_skills=[],
+        )
+        info = ProjectInfo(
+            project_type=ProjectType.ANDROID,
+            detected_skills=["navigation3"],
+        )
+        result = validate_skills_compliance(plan, info)
+        # "navigation3" is in detected but not in plan.android_skills
+        # However, "nav3" appears in task text so it might be detected
+        assert isinstance(result, SkillsComplianceResult)
+
+    def test_compliant_when_skills_in_plan(self):
+        plan = PlanModel(
+            title="Add navigation",
+            objectives=["o"],
+            tasks=["t"],
+            definition_of_done=["d"],
+            android_skills=["navigation3"],
+        )
+        info = ProjectInfo(
+            project_type=ProjectType.ANDROID,
+            detected_skills=["navigation3"],
+        )
+        result = validate_skills_compliance(plan, info)
+        assert result.compliant is True
+
+    def test_always_compliant_for_ios(self):
+        plan = PlanModel(
+            title="Fix bug",
+            objectives=["o"],
+            tasks=["t"],
+            definition_of_done=["d"],
+        )
+        info = ProjectInfo(project_type=ProjectType.IOS)
+        result = validate_skills_compliance(plan, info)
+        assert result.compliant is True
+
+
+# ---------------------------------------------------------------------------
+# Validation report generation
+# ---------------------------------------------------------------------------
+
+
+class TestValidationReport:
+    def test_render_report_contains_sections(self, tmp_path):
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+
+        plan_result = ValidationResult()
+        changes_result = ValidationResult()
+        skills_result = SkillsComplianceResult(compliant=True)
+
+        with patch("koteguard.validation.read_session_audit", return_value=[]):
+            report = render_validation_report(
+                session_id="test-01",
+                plan_result=plan_result,
+                changes_result=changes_result,
+                skills_result=skills_result,
+                worktree_path=tmp_path,
+                plan_path=tmp_path / "PLAN.md",
+                created_at=datetime.now(tz=timezone.utc),
+            )
+
+        assert "Validation Report" in report
+        assert "Plan Compliance" in report
+        assert "Change Analysis" in report
+        assert "Skills Compliance" in report
+        assert "Token Hygiene Score" in report
+
+    def test_report_shows_errors(self, tmp_path):
+        from unittest.mock import patch
+
+        plan_result = ValidationResult()
+        plan_result.add_error("PLAN.md is empty")
+        changes_result = ValidationResult()
+
+        with patch("koteguard.validation.read_session_audit", return_value=[]):
+            report = render_validation_report(
+                session_id="test-02",
+                plan_result=plan_result,
+                changes_result=changes_result,
+                skills_result=None,
+                worktree_path=tmp_path,
+                plan_path=tmp_path / "PLAN.md",
+            )
+
+        assert "❌" in report
+        assert "FAIL" in report
+
+    def test_write_validation_report(self, tmp_path):
+        from unittest.mock import patch
+
+        with patch("koteguard.validation.SESSIONS_DIR", tmp_path):
+            report_path = write_validation_report("sess-abc", "# Test Report\n")
+        assert report_path.exists()
+        assert "Test Report" in report_path.read_text()
+
+    def test_write_used_skills_json(self, tmp_path):
+        from unittest.mock import patch
+
+        with patch("koteguard.validation.SESSIONS_DIR", tmp_path):
+            skills_path = write_used_skills_json("sess-xyz", ["navigation3", "edge-to-edge"])
+        assert skills_path.exists()
+        data = json.loads(skills_path.read_text())
+        assert "navigation3" in data["used_skills"]

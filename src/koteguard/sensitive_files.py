@@ -111,7 +111,6 @@ class SensitiveFileHandler:
             matched = list(source_root.rglob(pattern))
 
             for real_file in matched:
-                # Compute relative path, place stub in worktree
                 try:
                     rel = real_file.relative_to(source_root)
                 except ValueError:
@@ -147,9 +146,9 @@ def _resolve_patterns(project_type: str) -> dict[str, str]:
     """Merge sensitive patterns for a given project type."""
     combined: dict[str, str] = {}
     pt = project_type.lower()
-    if pt in ("android", "monorepo", "flutter", "react_native"):
+    if pt in ("android", "monorepo"):
         combined.update(ANDROID_SENSITIVE)
-    if pt in ("ios", "monorepo", "flutter", "react_native"):
+    if pt in ("ios", "monorepo"):
         combined.update(IOS_SENSITIVE)
     # For unknown types, include all
     if pt == "unknown":

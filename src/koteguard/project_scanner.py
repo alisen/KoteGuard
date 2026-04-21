@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import plistlib
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -22,22 +23,41 @@ _ANDROID_SIGNATURES = [
     "gradlew",
 ]
 _IOS_SIGNATURES = [".xcodeproj", ".xcworkspace"]
-_FLUTTER_SIGNATURES = ["pubspec.yaml"]
-_RN_SIGNATURES = ["metro.config.js", "metro.config.ts"]
+
+# ---------------------------------------------------------------------------
+# Android skill detection keywords in build.gradle
+# ---------------------------------------------------------------------------
+
+_SKILL_KEYWORDS: dict[str, list[str]] = {
+    "navigation3": ["androidx.navigation", "navigation-compose", "NavHost"],
+    "edge-to-edge": [
+        "WindowCompat.setDecorFitsSystemWindows",
+        "enableEdgeToEdge",
+        "edge-to-edge",
+    ],
+    "agp9": ["com.android.tools.build:gradle:9", "agp9", "8.0", "AGP 9"],
+    "compose-migration": [
+        "androidx.compose",
+        "jetpack compose",
+        "composable",
+        "ComposeView",
+    ],
+}
+
+_AGENT_KEYWORDS = ["agent", "copilot", "ai assistant", "llm", "cursor", "firebender"]
 
 
-def _find_files(root: Path, pattern: str, max_depth: int = 3) -> list[Path]:
+def _find_files(root: Path, pattern: str, max_depth: int = 4) -> list[Path]:
     """Glob helper with depth cap to stay fast."""
     results: list[Path] = []
     for depth in range(max_depth + 1):
         glob_pat = "/".join(["*"] * depth) + ("/" if depth else "") + pattern
         results.extend(root.glob(glob_pat))
-    # Also try a direct match
     results.extend(root.glob(pattern))
     return list(dict.fromkeys(results))  # deduplicate, preserve order
 
 
-def _has_file(root: Path, name: str, max_depth: int = 3) -> bool:
+def _has_file(root: Path, name: str, max_depth: int = 4) -> bool:
     return bool(_find_files(root, name, max_depth))
 
 
@@ -98,29 +118,6 @@ def _parse_info_plist(path: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Flutter parsing
-# ---------------------------------------------------------------------------
-
-
-def _parse_pubspec(path: Path) -> dict[str, Any]:
-    """Extract project name and flutter SDK constraint from pubspec.yaml."""
-    info: dict[str, Any] = {}
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return info
-
-    m = re.search(r"^name:\s*(.+)$", text, re.MULTILINE)
-    if m:
-        info["project_name"] = m.group(1).strip()
-
-    m = re.search(r"flutter:\s*['\"]?>=?([\d.]+)", text)
-    if m:
-        info["flutter_sdk"] = m.group(1)
-    return info
-
-
-# ---------------------------------------------------------------------------
 # Main scanner
 # ---------------------------------------------------------------------------
 
@@ -135,24 +132,16 @@ class ProjectScanner:
         """Run all detectors and return a consolidated ProjectInfo."""
         t0 = time.monotonic()
 
-        # Collect signals
         is_android = self._is_android()
         is_ios = self._is_ios()
-        is_flutter = self._is_flutter()
-        is_rn = self._is_react_native()
 
-        # Determine primary type + confidence
         scores: dict[ProjectType, float] = {}
-        if is_flutter:
-            scores[ProjectType.FLUTTER] = 0.95
         if is_android and is_ios:
             scores[ProjectType.MONOREPO] = 0.75
         if is_android:
             scores[ProjectType.ANDROID] = 0.90
         if is_ios:
             scores[ProjectType.IOS] = 0.90
-        if is_rn:
-            scores[ProjectType.REACT_NATIVE] = 0.85
 
         if not scores:
             project_type = ProjectType.UNKNOWN
@@ -163,7 +152,7 @@ class ProjectScanner:
 
         info = ProjectInfo(
             project_type=project_type,
-            project_name=self._detect_project_name(project_type),
+            project_name=self._detect_project_name(),
             root=self.root,
             confidence=confidence,
             has_tests=self._has_tests(),
@@ -171,18 +160,22 @@ class ProjectScanner:
             languages=self._detect_languages(),
             frameworks=self._detect_frameworks(project_type),
             sub_projects=self._detect_sub_projects(),
+            android_cli_available=self._detect_android_cli(),
+            detected_skills=self._scan_for_skills(),
+            doc_summary=self._analyze_documentation(),
         )
 
-        # Type-specific enrichment
         if project_type in (ProjectType.ANDROID, ProjectType.MONOREPO):
             info = self._enrich_android(info)
         if project_type in (ProjectType.IOS, ProjectType.MONOREPO):
             info = self._enrich_ios(info)
-        if project_type == ProjectType.FLUTTER:
-            info = self._enrich_flutter(info)
+
+        # Auto-suggest skills based on project features
+        info.detected_skills = list(
+            set(info.detected_skills) | set(self._suggest_skills(info))
+        )
 
         elapsed = (time.monotonic() - t0) * 1000
-        # Target < 600 ms – logged for observability; no hard failure
         info.elapsed_ms = elapsed
         return info
 
@@ -200,21 +193,16 @@ class ProjectScanner:
     def _is_ios(self) -> bool:
         return any(_has_extension_dir(self.root, ext) for ext in _IOS_SIGNATURES)
 
-    def _is_flutter(self) -> bool:
-        return _has_file(self.root, "pubspec.yaml")
-
-    def _is_react_native(self) -> bool:
-        return any(_has_file(self.root, sig) for sig in _RN_SIGNATURES)
-
     def _has_tests(self) -> bool:
         test_dirs = {"test", "tests", "androidTest", "iosTest", "__tests__"}
-        # Check at root level first (fast path)
         if any((self.root / d).is_dir() for d in test_dirs):
             return True
-        # Check nested (e.g. app/src/androidTest)
-        for sub in self.root.rglob("*"):
-            if sub.is_dir() and sub.name in test_dirs:
-                return True
+        # Depth-capped search (max 4 levels)
+        for depth in range(1, 5):
+            pattern = "/".join(["*"] * depth)
+            for sub in self.root.glob(pattern):
+                if sub.is_dir() and sub.name in test_dirs:
+                    return True
         return False
 
     def _has_ci(self) -> bool:
@@ -230,12 +218,10 @@ class ProjectScanner:
         return any((self.root / p).exists() for p in ci_paths)
 
     def _detect_languages(self) -> list[str]:
-        langs: list[str] = []
         ext_map = {
             ".kt": "Kotlin",
             ".java": "Java",
             ".swift": "Swift",
-            ".dart": "Dart",
             ".ts": "TypeScript",
             ".tsx": "TypeScript",
             ".js": "JavaScript",
@@ -243,15 +229,16 @@ class ProjectScanner:
             ".py": "Python",
         }
         found: set[str] = set()
-        for path in self.root.rglob("*"):
-            if path.suffix in ext_map and ext_map[path.suffix] not in found:
-                # Skip vendor / build dirs
-                parts = set(path.parts)
-                if parts & {"node_modules", "build", ".gradle", "Pods", ".pub-cache"}:
-                    continue
-                found.add(ext_map[path.suffix])
-        langs = sorted(found)
-        return langs
+        # Depth-capped glob (max 4 levels)
+        for depth in range(1, 5):
+            pattern = "/".join(["*"] * depth)
+            for path in self.root.glob(pattern):
+                if path.suffix in ext_map and ext_map[path.suffix] not in found:
+                    parts = set(path.parts)
+                    if parts & {"node_modules", "build", ".gradle", "Pods"}:
+                        continue
+                    found.add(ext_map[path.suffix])
+        return sorted(found)
 
     def _detect_frameworks(self, project_type: ProjectType) -> list[str]:
         frameworks: list[str] = []
@@ -261,39 +248,34 @@ class ProjectScanner:
                 self.root, "build.gradle.kts"
             ):
                 frameworks.append("Gradle")
-            if _has_file(self.root, "compose.gradle") or _has_file(
-                self.root, "compose.gradle.kts"
-            ):
-                frameworks.append("Jetpack Compose")
+            # Check for Compose usage
+            gradle_files = list(self.root.glob("**/*.gradle")) + list(
+                self.root.glob("**/*.gradle.kts")
+            )
+            for gf in gradle_files[:10]:  # limit scan
+                try:
+                    content = gf.read_text(encoding="utf-8", errors="ignore")
+                    if "androidx.compose" in content or "compose" in content.lower():
+                        frameworks.append("Jetpack Compose")
+                        break
+                except OSError:
+                    pass
         elif project_type == ProjectType.IOS:
             frameworks.append("UIKit/SwiftUI")
             if (self.root / "Podfile").exists():
                 frameworks.append("CocoaPods")
             if (self.root / "Package.swift").exists():
                 frameworks.append("Swift Package Manager")
-        elif project_type == ProjectType.FLUTTER:
-            frameworks.append("Flutter")
-        elif project_type == ProjectType.REACT_NATIVE:
-            frameworks.append("React Native")
         return frameworks
 
-    def _detect_project_name(self, project_type: ProjectType) -> str:
-        # Try pubspec first (Flutter)
-        pubspec = self.root / "pubspec.yaml"
-        if pubspec.exists():
-            data = _parse_pubspec(pubspec)
-            if data.get("project_name"):
-                return data["project_name"]
-        # Fallback: directory name
+    def _detect_project_name(self) -> str:
         return self.root.name
 
     def _detect_sub_projects(self) -> list[str]:
         """Detect module/sub-project directories."""
         subs: list[str] = []
         for child in self.root.iterdir():
-            if not child.is_dir():
-                continue
-            if child.name.startswith("."):
+            if not child.is_dir() or child.name.startswith("."):
                 continue
             if (child / "build.gradle").exists() or (
                 child / "build.gradle.kts"
@@ -302,11 +284,153 @@ class ProjectScanner:
         return subs
 
     # ------------------------------------------------------------------
+    # Android v1.1: CLI + Skills detection
+    # ------------------------------------------------------------------
+
+    def _detect_android_cli(self) -> bool:
+        """Check if Android CLI is available."""
+        if shutil.which("android"):
+            return True
+        kote_android = Path.home() / ".kote" / "bin" / "android"
+        return kote_android.exists()
+
+    def _scan_for_skills(self) -> list[str]:
+        """Scan for SKILL.md files and build.gradle keywords."""
+        found: list[str] = []
+
+        # Look for SKILL.md files
+        for skill_file in self.root.glob("**/SKILL.md"):
+            try:
+                content = skill_file.read_text(encoding="utf-8", errors="ignore")
+                # Extract skill name from H1 header
+                m = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+                if m:
+                    found.append(m.group(1).strip())
+            except OSError:
+                pass
+
+        # Check build.gradle files for known skill keywords
+        gradle_files = list(self.root.glob("**/*.gradle")) + list(
+            self.root.glob("**/*.gradle.kts")
+        )
+        for gf in gradle_files[:20]:
+            try:
+                content = gf.read_text(encoding="utf-8", errors="ignore")
+                for skill_name, keywords in _SKILL_KEYWORDS.items():
+                    if skill_name not in found:
+                        if any(kw.lower() in content.lower() for kw in keywords):
+                            found.append(skill_name)
+            except OSError:
+                pass
+
+        return list(dict.fromkeys(found))
+
+    def _scan_agent_keywords(self) -> list[str]:
+        """Scan README.md and ARCHITECTURE.md for agent-related keywords."""
+        found: list[str] = []
+        for doc_name in ("README.md", "ARCHITECTURE.md"):
+            doc_path = self.root / doc_name
+            if doc_path.exists():
+                try:
+                    content = doc_path.read_text(encoding="utf-8", errors="ignore").lower()
+                    for kw in _AGENT_KEYWORDS:
+                        if kw in content and kw not in found:
+                            found.append(kw)
+                except OSError:
+                    pass
+        return found
+
+    def _suggest_skills(self, info: ProjectInfo) -> list[str]:
+        """Map detected features to recommended skill names."""
+        suggestions: list[str] = []
+        if info.project_type not in (ProjectType.ANDROID, ProjectType.MONOREPO):
+            return suggestions
+
+        # Check frameworks
+        if "Jetpack Compose" in info.frameworks:
+            if "compose-migration" not in info.detected_skills:
+                suggestions.append("compose-migration")
+
+        # Check for navigation usage in gradle
+        gradle_files = list(self.root.glob("**/*.gradle")) + list(
+            self.root.glob("**/*.gradle.kts")
+        )
+        for gf in gradle_files[:10]:
+            try:
+                content = gf.read_text(encoding="utf-8", errors="ignore")
+                if "navigation" in content.lower():
+                    if "navigation3" not in info.detected_skills:
+                        suggestions.append("navigation3")
+                    break
+            except OSError:
+                pass
+
+        return suggestions
+
+    # ------------------------------------------------------------------
+    # Documentation analysis
+    # ------------------------------------------------------------------
+
+    def _analyze_documentation(self) -> dict[str, list[str]]:
+        """
+        Scan README, ARCHITECTURE, CONTRIBUTING, docs/**, .github/**/*.md
+        and extract headers + score keywords.
+        """
+        doc_summary: dict[str, list[str]] = {}
+        arch_keywords = [
+            "mvvm",
+            "clean",
+            "architecture",
+            "compose",
+            "swiftui",
+            "coordinator",
+            "viper",
+            "redux",
+            "mvi",
+            "repository",
+            "usecase",
+            "viewmodel",
+        ]
+
+        # Collect documentation files
+        doc_files: list[Path] = []
+        for name in ("README.md", "ARCHITECTURE.md", "CONTRIBUTING.md"):
+            p = self.root / name
+            if p.exists():
+                doc_files.append(p)
+
+        # docs/** and .github/**/*.md
+        for pattern in ("docs/**/*.md", ".github/**/*.md"):
+            doc_files.extend(self.root.glob(pattern))
+
+        for doc_path in doc_files:
+            try:
+                content = doc_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+
+            headers: list[str] = []
+            for line in content.splitlines():
+                m = re.match(r"^#{1,2}\s+(.+)$", line)
+                if m:
+                    headers.append(m.group(1).strip())
+
+            # Score keywords
+            content_lower = content.lower()
+            found_kw = [kw for kw in arch_keywords if kw in content_lower]
+            if found_kw:
+                headers.extend([f"[keyword:{kw}]" for kw in found_kw])
+
+            rel_name = str(doc_path.relative_to(self.root))
+            doc_summary[rel_name] = headers
+
+        return doc_summary
+
+    # ------------------------------------------------------------------
     # Enrichment
     # ------------------------------------------------------------------
 
     def _enrich_android(self, info: ProjectInfo) -> ProjectInfo:
-        # Find the app module build.gradle
         candidates = list(self.root.rglob("build.gradle")) + list(
             self.root.rglob("build.gradle.kts")
         )
@@ -328,11 +452,4 @@ class ProjectScanner:
                 info.ios_bundle_id = data["ios_bundle_id"]
                 info.ios_deployment_target = data.get("ios_deployment_target")
                 break
-        return info
-
-    def _enrich_flutter(self, info: ProjectInfo) -> ProjectInfo:
-        pubspec = self.root / "pubspec.yaml"
-        if pubspec.exists():
-            data = _parse_pubspec(pubspec)
-            info.flutter_sdk = data.get("flutter_sdk")
         return info
