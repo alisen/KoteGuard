@@ -185,7 +185,7 @@ class WorktreeEngine:
         # Generate and copy diff/patch
         patch_content = ""
         try:
-            repo = self._get_repo()
+            repo = git.Repo(project_root, search_parent_directories=True)
             try:
                 patch_content = repo.git.diff(f"HEAD...{meta.branch_name}")
                 (history_dir / "changes.diff").write_text(patch_content, encoding="utf-8")
@@ -307,20 +307,21 @@ class WorktreeEngine:
     def _remove_worktree(self, meta: SessionMeta) -> None:
         """Prune worktree and delete branch."""
         worktree_path = Path(meta.worktree_path)
+        project_root = Path(meta.project_root)
         try:
-            repo = self._get_repo()
+            repo = git.Repo(project_root, search_parent_directories=True)
             repo.git.worktree("remove", "--force", str(worktree_path))
         except Exception:
             if worktree_path.exists():
                 shutil.rmtree(worktree_path, ignore_errors=True)
             try:
-                repo = self._get_repo()
+                repo = git.Repo(project_root, search_parent_directories=True)
                 repo.git.worktree("prune")
             except Exception:
                 pass
 
         try:
-            repo = self._get_repo()
+            repo = git.Repo(project_root, search_parent_directories=True)
             repo.git.branch("-D", meta.branch_name)
         except Exception:
             pass

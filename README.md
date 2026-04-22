@@ -90,10 +90,15 @@ kote status
 # 3. Copy the ready-to-run Copilot CLI command
 kote cli
 
-# 4. When the agent is done — validate + merge back
+# 4. Inside the worktree, make sure the agent committed its changes
+#    KoteGuard diffs branch commits — uncommitted changes will not be merged
+#    cd /path/to/worktree && git add -A && git commit -m "agent: apply changes"
+
+# 5. Back in your project root — validate + merge back
+cd your-android-or-ios-project   # same dir as step 1
 kote cleanup --accept
 
-# 5. Or throw it away
+# 6. Or throw it away
 kote cleanup --discard
 ```
 
@@ -154,15 +159,26 @@ kote cleanup --accept
 | `kote ide [session]` | Launch Android Studio or Xcode for a session |
 | `kote cli [session]` | Print complete `copilot` command + open terminal |
 | `kote status` | Rich table: all sessions with age, skills, context pressure |
-| `kote cleanup --accept` | Validate → merge → archive history |
+| `kote cleanup --accept` | **Run from the original project root.** Validate → merge → archive history. Auto-picks most recent active session. |
+| `kote cleanup <session-id> --accept` | Target a specific session by ID (find IDs with `kote status`) |
 | `kote cleanup --discard` | Throw away changes, preserve audit trail |
-| `kote cleanup --accept --force` | Accept even when validation has errors |
+| `kote cleanup --accept --force` | Accept even when validation has errors or uncommitted changes are detected |
 | `kote cleanup --accept --compact` | Accept + save session summary to WORKSPACE.md |
 | `kote validate [plan.md]` | Validate PLAN.md against schema |
 | `kote validate -w WORKSPACE.md` | Also validate WORKSPACE.md |
 | `kote android skills` | List bundled skills + suggest for current project |
 | `kote android docs` | Android KB links + worktree status |
 | `kote version` | Print version |
+
+### Tips & Gotchas
+
+- **Run `kote cleanup` from the project root** — the same directory where you ran `kote prep`. Running it from a different directory causes git operations (diff, merge, branch deletion) to target the wrong repository.
+
+- **The agent must commit its changes** — KoteGuard detects what changed by diffing *branch commits* against `main`. If the agent modifies files but never runs `git commit`, those changes do not exist as commits and will not be merged. KoteGuard will block cleanup with a clear error and recovery instructions when this is detected. Use `--force` to skip the block and proceed (the uncommitted changes will not be merged).
+
+- **"No changed files detected" warning** — means the agent branch has no new commits relative to `main`. Check the worktree for uncommitted files before accepting. If the session was already committed and merged manually, this is expected.
+
+- **Find session IDs** — run `kote status` to see all sessions, their IDs, age, and whether the worktree still exists.
 
 ---
 

@@ -729,6 +729,37 @@ def cleanup(
                     write_validation_report,
                 )
 
+                # Check for uncommitted changes — they would be silently lost on merge
+                try:
+                    import git as _git
+                    wt_repo = _git.Repo(worktree_path)
+                    if wt_repo.is_dirty(untracked_files=False):
+                        console.print(
+                            f"[bold red]✗ Uncommitted changes detected in worktree[/] for session {sid}\n"
+                            "  The agent modified files without committing — they will be permanently\n"
+                            "  lost if cleanup proceeds.\n\n"
+                            "  To preserve them, commit first:\n"
+                            f"    cd {worktree_path}\n"
+                            f"    git add -A && git commit -m 'agent: apply changes'\n"
+                            f"    cd {meta.project_root}\n"
+                            "    kote cleanup --accept\n\n"
+                            "  Or to discard the changes and close the session:\n"
+                            f"    kote cleanup {sid} --discard"
+                        )
+                        if not force:
+                            err_console.print(
+                                f"[red]Blocked[/] session {sid} — commit worktree changes first, "
+                                "or use --force to proceed (uncommitted changes will be discarded)"
+                            )
+                            continue
+                        else:
+                            console.print(
+                                "[yellow]--force: proceeding despite uncommitted changes "
+                                "(they will not be merged)[/]"
+                            )
+                except Exception:
+                    pass
+
                 plan_path = worktree_path / "PLAN.md"
                 plan_result = validate_plan_file(plan_path)
 
