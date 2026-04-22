@@ -1,22 +1,25 @@
 version: 2
 updates:
-  # Python dependencies
+  # Python dependencies — grouped into one weekly PR
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    rebase-strategy: "auto"
     groups:
-      dev-dependencies:
-        patterns: ["pytest*"]
-      core-dependencies:
-        patterns: ["typer*", "rich*", "pydantic*", "gitpython*", "questionary*", "tomli*", "pyyaml*"]
+      python-deps:
+        patterns: ["*"]   # all pip updates in one PR
 
-  # GitHub Actions
+  # GitHub Actions — grouped into one weekly PR
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    rebase-strategy: "auto"
+    groups:
+      github-actions:
+        patterns: ["*"]   # all actions updates in one PR
