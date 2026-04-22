@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://koteguard.com"><img src="https://img.shields.io/badge/website-koteguard.com-blue?style=flat-square" alt="koteguard.com"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square" alt="Python 3.12+">
-  <a href="https://pypi.org/project/koteguard/"><img src="https://img.shields.io/pypi/v/koteguard?style=flat-square&label=version&color=orange" alt="PyPI Version"></a>
+  <a href="https://pypi.org/project/koteguard/"><img src="https://img.shields.io/pypi/v/koteguard?style=flat-square&label=version&color=orange&include_prereleases=true" alt="PyPI Version"></a>
   <img src="https://img.shields.io/badge/platform-Android%20%7C%20iOS-green?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="MIT License">
   <a href="https://github.com/alisen/KoteGuard/actions/workflows/ci.yml"><img src="https://github.com/alisen/KoteGuard/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
