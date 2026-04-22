@@ -1,0 +1,11 @@
+title: KoteGuard
+description: Safe GitHub Copilot agent sandboxing for Android and iOS developers.
+url: "https://koteguard.com"
+theme: jekyll-theme-hacker
+
+# Repository
+github:
+  repository_url: https://github.com/alisen/KoteGuard
+
+# Show downloads
+show_downloads: true
