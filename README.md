@@ -1,9 +1,10 @@
 <p align="center">
+  <a href="https://koteguard.com"><img src="https://img.shields.io/badge/website-koteguard.com-blue?style=flat-square" alt="koteguard.com"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/version-1.0.0--alpha.1-orange?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/platform-Android%20%7C%20iOS-green?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="MIT License">
-  <img src="https://img.shields.io/badge/tests-157%20passing-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-196%20passing-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 <h1 align="center">KoteGuard 🛡️</h1>
@@ -61,6 +62,17 @@ git clone https://github.com/alisen/KoteGuard.git
 cd KoteGuard
 git checkout alpha/v1.0.0-alpha.1
 pip install -e ".[dev]"
+```
+
+**Local install (no GitHub push needed — for testing before publishing):**
+
+```bash
+# Using pipx (recommended for CLI tools)
+brew install pipx && pipx ensurepath
+pipx install /path/to/KoteGuard
+
+# Or with pip directly
+pip install /path/to/KoteGuard
 ```
 
 ---
@@ -138,6 +150,7 @@ kote cleanup --accept
 |---------|-------------|
 | `kote prep` | Full wizard: analyse → plan → worktree → IDE |
 | `kote prep --android-first` | Wizard with Android skills selection |
+| `kote prep --agent-mode <mode>` | Override agent mode: `copilot-cli` \| `copilot-plugin` \| `none` |
 | `kote prep --dry-run` | Simulate without creating a worktree |
 | `kote ide [session]` | Launch Android Studio or Xcode for a session |
 | `kote cli [session]` | Print complete `copilot` command + open terminal |
@@ -169,6 +182,41 @@ KoteGuard bundles best-practice SKILL.md guides that get injected into the agent
 kote android skills   # see what's available + what's suggested
 kote android docs     # Android developer documentation links
 ```
+
+---
+
+## Spec-Driven Development
+
+Every `PLAN.md` KoteGuard creates has a **machine-readable YAML block** at the top. This is the source of truth — not just documentation.
+
+```yaml
+---
+spec_version: '1.0'
+title: Implement login screen
+tasks:
+- id: t1
+  description: Create LoginViewModel
+  done: false
+- id: t2
+  description: Wire up UI
+  done: false
+definition_of_done:
+- All tests pass
+- Reviewed
+---
+
+# Implement login screen
+...
+```
+
+**The agent is instructed to update `done: true`** for each task it completes, directly inside that YAML block. When you run `kote cleanup --accept`, KoteGuard:
+
+1. **Parses the YAML** — reads exactly which tasks were marked done
+2. **Validates semantically** — checks that changed files actually match each task's keywords (CamelCase-aware: `NavGraph` → searches for `nav`, `graph` in file paths)
+3. **Warns if tasks are undone** — if files changed but all tasks are still `done: false`, it flags it
+4. **Survives corruption** — if the agent breaks the YAML, a regex fallback recovers the plan silently
+
+This is why PLAN.md is not just a text document — it's a live spec the agent writes back to.
 
 ---
 
@@ -246,6 +294,31 @@ templates/
 
 ---
 
+## Agent Modes
+
+KoteGuard supports three ways to run the Copilot agent. Set the default in `~/.kote/config.toml` or override per session with `kote prep --agent-mode`.
+
+| Mode | How it runs | `kote cli` output |
+|------|-------------|-------------------|
+| `copilot-cli` *(default)* | Terminal binary with `--deny-tool` security flags | Full copy-pasteable command |
+| `copilot-plugin` | IDE chat panel (Android Studio, VS Code) | Open IDE at worktree path |
+| `none` | Instructions injected only — bring your own agent | `cd <worktree>` |
+
+**Set default in `~/.kote/config.toml`:**
+
+```toml
+agent_mode = "copilot-cli"   # copilot-cli | copilot-plugin | none
+android_cli_enabled = true
+```
+
+**Override per session:**
+
+```bash
+kote prep --agent-mode copilot-plugin
+```
+
+---
+
 ## Contributing
 
 ```bash
@@ -253,11 +326,11 @@ git clone https://github.com/alisen/KoteGuard.git
 cd KoteGuard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest   # 157 tests, all green
+pytest   # 196 tests, all green
 ```
 
 ---
 
 ## License
 
-MIT © [Alishen](https://github.com/alisen)
+MIT © [Alishen](https://koteguard.com)

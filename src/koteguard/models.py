@@ -36,13 +36,29 @@ class IDEChoice(str, Enum):
     AUTO = "auto"
 
 
+class AgentMode(str, Enum):
+    """How the Copilot agent is invoked for a session."""
+
+    COPILOT_CLI = "copilot-cli"       # terminal: copilot binary with deny-tool flags
+    COPILOT_PLUGIN = "copilot-plugin"  # IDE plugin: no CLI command generated
+    NONE = "none"                      # instructions injected only, no tool launched
+
+
 # ---------------------------------------------------------------------------
 # Task / Plan / Workspace models
 # ---------------------------------------------------------------------------
 
 
+class PlanTask(BaseModel):
+    """A single task within a PLAN.md, tracked as a spec item."""
+
+    id: str = Field(..., description="Auto-generated task ID, e.g. 't1', 't2'")
+    description: str = Field(..., min_length=1, description="What must be done")
+    done: bool = Field(default=False, description="Set to true by the agent when complete")
+
+
 class TaskModel(BaseModel):
-    """Represents a single agent task."""
+    """Represents a single agent task (TASK.md document)."""
 
     session_id: str = Field(..., description="Unique session identifier")
     description: str = Field(..., min_length=1, description="What the agent must do")
@@ -62,22 +78,37 @@ class TaskModel(BaseModel):
 
 
 class PlanModel(BaseModel):
-    """Represents the contents of a PLAN.md file."""
+    """Represents the contents of a PLAN.md file (source of truth spec)."""
 
+    spec_version: str = Field(default="1.0", description="KoteGuard spec format version")
     title: str = Field(..., min_length=1)
     objectives: list[str] = Field(..., min_length=1)
-    tasks: list[str] = Field(..., min_length=1)
+    tasks: list[PlanTask] = Field(..., min_length=1)
     definition_of_done: list[str] = Field(..., min_length=1)
     estimated_time: str = Field(default="unknown")
     risks: list[str] = Field(default_factory=list)
     android_skills: list[str] = Field(default_factory=list)
 
-    @field_validator("objectives", "tasks", "definition_of_done", mode="before")
+    @field_validator("objectives", "definition_of_done", mode="before")
     @classmethod
-    def non_empty_list(cls, v: Any) -> list[str]:
+    def non_empty_list(cls, v: Any) -> Any:
         if isinstance(v, list) and len(v) == 0:
             raise ValueError("list must not be empty")
         return v
+
+    @field_validator("tasks", mode="before")
+    @classmethod
+    def non_empty_tasks(cls, v: Any) -> Any:
+        if isinstance(v, list) and len(v) == 0:
+            raise ValueError("tasks list must not be empty")
+        # Accept list[str] (legacy) and coerce to list[PlanTask] dicts
+        coerced = []
+        for i, item in enumerate(v, 1):
+            if isinstance(item, str):
+                coerced.append({"id": f"t{i}", "description": item, "done": False})
+            else:
+                coerced.append(item)
+        return coerced
 
 
 class WorkspaceModel(BaseModel):
@@ -110,6 +141,7 @@ class SessionMeta(BaseModel):
     completed_at: datetime | None = None
     plan_title: str = ""
     ide: IDEChoice = IDEChoice.AUTO
+    agent_mode: AgentMode = AgentMode.COPILOT_CLI
     android_cli_available: bool = False
     skills_loaded: list[str] = Field(default_factory=list)
 
@@ -223,6 +255,8 @@ class GlobalConfig(BaseModel):
     auto_open_ide: bool = True
     android_cli_version: str = ""
     skills_repo_url: str = "https://github.com/android/skills"
+    agent_mode: AgentMode = AgentMode.COPILOT_CLI
+    android_cli_enabled: bool = True
 
     model_config = {"arbitrary_types_allowed": True, "use_enum_values": True}
 
@@ -233,5 +267,6 @@ class ProjectLocalConfig(BaseModel):
     last_session_id: str | None = None
     default_ide: IDEChoice | None = None
     notes: str = ""
+    android_cli_enabled: bool | None = None  # None = defer to GlobalConfig
 
     model_config = {"use_enum_values": True}

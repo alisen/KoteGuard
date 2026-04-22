@@ -125,8 +125,9 @@ def _parse_info_plist(path: Path) -> dict[str, Any]:
 class ProjectScanner:
     """Analyses a project directory and returns a ProjectInfo."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, android_cli_enabled: bool = True) -> None:
         self.root = root or Path.cwd()
+        self._android_cli_enabled = android_cli_enabled
 
     def scan(self) -> ProjectInfo:
         """Run all detectors and return a consolidated ProjectInfo."""
@@ -288,7 +289,9 @@ class ProjectScanner:
     # ------------------------------------------------------------------
 
     def _detect_android_cli(self) -> bool:
-        """Check if Android CLI is available."""
+        """Check if Android CLI is available. Returns False immediately when disabled."""
+        if not self._android_cli_enabled:
+            return False
         if shutil.which("android"):
             return True
         kote_android = Path.home() / ".kote" / "bin" / "android"

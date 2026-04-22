@@ -19,7 +19,7 @@ from koteguard.config import (
     append_session_audit,
     load_global_config,
 )
-from koteguard.models import SessionMeta, SessionStatus
+from koteguard.models import AgentMode, SessionMeta, SessionStatus
 
 
 def _slugify(text: str) -> str:
@@ -84,6 +84,7 @@ class WorktreeEngine:
         session_id: str | None = None,
         base_branch: str | None = None,
         plan_title: str = "",
+        agent_mode: AgentMode = AgentMode.COPILOT_CLI,
     ) -> SessionMeta:
         """
         Create a new git worktree for an agent session.
@@ -121,6 +122,7 @@ class WorktreeEngine:
             branch_name=branch_name,
             status=SessionStatus.ACTIVE,
             plan_title=plan_title or task_description,
+            agent_mode=agent_mode,
         )
         save_session(meta)
 

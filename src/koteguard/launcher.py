@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from koteguard.models import IDEChoice
+from koteguard.models import AgentMode, IDEChoice
 
 # ---------------------------------------------------------------------------
 # IDE detection helpers
@@ -117,13 +117,19 @@ def pick_ide(ide_choice: IDEChoice, worktree_path: Path) -> str | None:
     return android_binary or xcode_binary
 
 
-def build_copilot_cli_command(worktree_path: Path) -> str:
+def build_copilot_cli_command(
+    worktree_path: Path,
+    agent_mode: AgentMode = AgentMode.COPILOT_CLI,
+) -> str | None:
     """
     Build a complete, copy-pasteable Copilot CLI command with deny-tool flags
     and COPILOT_CUSTOM_INSTRUCTIONS_DIRS env var.
 
-    Returns the full command string.
+    Returns None for non-CLI agent modes (copilot-plugin, none).
     """
+    if agent_mode != AgentMode.COPILOT_CLI:
+        return None
+
     deny_flags = " ".join(f"--deny-tool='{tool}'" for tool in _DENY_TOOLS)
     instructions_dir = ".github/instructions"
 

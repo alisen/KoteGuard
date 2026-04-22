@@ -72,7 +72,7 @@ def validate_plan_file(plan_path: Path) -> ValidationResult:
     if plan.title in ("Untitled Plan", ""):
         result.add_warning("Plan has no meaningful title")
 
-    placeholder_tasks = [t for t in plan.tasks if t.strip() in ("(none)", "")]
+    placeholder_tasks = [t for t in plan.tasks if t.description.strip() in ("(none)", "")]
     if placeholder_tasks:
         result.add_warning("Plan contains placeholder tasks – fill them in")
 
@@ -140,6 +140,20 @@ def _extract_list_section(markdown: str, section: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _task_keywords(description: str) -> set[str]:
+    """Extract keywords from a task description, splitting CamelCase words."""
+    # Split CamelCase: "NavGraph" → ["Nav", "Graph"]
+    spaced = re.sub(r"([A-Z])", r" \1", description)
+    words = re.findall(r"[a-zA-Z]{3,}", spaced)
+    return {w.lower() for w in words}
+
+
+def _file_matches_task(file_path: str, keywords: set[str]) -> bool:
+    """Return True if the file path contains any of the task keywords."""
+    path_lower = file_path.lower()
+    return any(kw in path_lower for kw in keywords)
+
+
 def validate_changes_against_plan(
     worktree_path: Path,
     plan_path: Path,
@@ -155,10 +169,26 @@ def validate_changes_against_plan(
 
     plan = parse_plan(plan_path.read_text(encoding="utf-8"))
 
-    task_keywords: set[str] = set()
+    if not changed_files:
+        result.add_warning("No changed files detected in worktree")
+        return result
+
+    # Semantic matching: check each task against changed file paths
     for task in plan.tasks:
-        words = re.findall(r"\b[a-zA-Z]{3,}\b", task.lower())
-        task_keywords.update(words)
+        keywords = _task_keywords(task.description)
+        if keywords and not any(_file_matches_task(f, keywords) for f in changed_files):
+            result.add_warning(
+                f'Task `{task.id}` "{task.description}" has no matching changed files – '
+                "verify work is complete"
+            )
+
+    # Check if agent updated any task as done
+    all_undone = all(not t.done for t in plan.tasks)
+    if all_undone and changed_files:
+        result.add_warning(
+            "All tasks still marked `done: false` in PLAN.md spec – "
+            "the agent should set `done: true` for completed tasks"
+        )
 
     suspicious_patterns = [
         (r"\.github/workflows/", "CI workflow changes"),
@@ -171,9 +201,6 @@ def validate_changes_against_plan(
             result.add_warning(
                 f"Unexpected {label} – verify these are intentional: {matching}"
             )
-
-    if not changed_files:
-        result.add_warning("No changed files detected in worktree")
 
     return result
 
@@ -201,7 +228,8 @@ def validate_skills_compliance(
     referenced = set(plan.android_skills)
 
     # Also scan task text for skill name mentions
-    all_task_text = " ".join(plan.tasks + plan.objectives).lower()
+    task_descriptions = [t.description for t in plan.tasks]
+    all_task_text = " ".join(task_descriptions + plan.objectives).lower()
     for skill in recommended:
         if skill.lower() in all_task_text:
             referenced.add(skill)

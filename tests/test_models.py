@@ -6,11 +6,13 @@ import pytest
 from pydantic import ValidationError
 
 from koteguard.models import (
+    AgentMode,
     AndroidSkillRef,
     AuditEntry,
     GlobalConfig,
     IDEChoice,
     PlanModel,
+    PlanTask,
     ProjectInfo,
     ProjectLocalConfig,
     ProjectType,
@@ -231,6 +233,18 @@ class TestSessionMeta:
         assert meta.completed_at is None
         assert meta.plan_title == ""
         assert meta.android_cli_available is False
+        assert meta.agent_mode == "copilot-cli"
+
+    def test_agent_mode_field(self, tmp_path):
+        meta = SessionMeta(
+            session_id="sess-am",
+            project_slug="p",
+            project_root=tmp_path,
+            worktree_path=tmp_path,
+            branch_name="b",
+            agent_mode=AgentMode.COPILOT_PLUGIN,
+        )
+        assert meta.agent_mode == "copilot-plugin"
 
     def test_status_enum_values(self, tmp_path):
         meta = SessionMeta(
@@ -271,6 +285,62 @@ class TestSessionMeta:
 # ---------------------------------------------------------------------------
 
 
+class TestPlanTask:
+    def test_valid(self):
+        t = PlanTask(id="t1", description="Create NavGraph")
+        assert t.id == "t1"
+        assert t.description == "Create NavGraph"
+        assert t.done is False
+
+    def test_done_true(self):
+        t = PlanTask(id="t2", description="Write tests", done=True)
+        assert t.done is True
+
+    def test_plan_model_accepts_string_tasks(self):
+        """Legacy: list[str] tasks should be coerced to list[PlanTask]."""
+        p = PlanModel(
+            title="Test",
+            objectives=["o"],
+            tasks=["Task one", "Task two"],
+            definition_of_done=["Done"],
+        )
+        assert len(p.tasks) == 2
+        assert isinstance(p.tasks[0], PlanTask)
+        assert p.tasks[0].id == "t1"
+        assert p.tasks[0].description == "Task one"
+
+    def test_plan_model_accepts_plan_task_objects(self):
+        """Native: list[PlanTask] should be accepted as-is."""
+        p = PlanModel(
+            title="Test",
+            objectives=["o"],
+            tasks=[PlanTask(id="t1", description="Do X"), PlanTask(id="t2", description="Do Y")],
+            definition_of_done=["Done"],
+        )
+        assert p.tasks[0].id == "t1"
+        assert p.tasks[1].description == "Do Y"
+
+    def test_spec_version_default(self):
+        p = PlanModel(
+            title="t",
+            objectives=["o"],
+            tasks=["t"],
+            definition_of_done=["d"],
+        )
+        assert p.spec_version == "1.0"
+
+
+class TestAgentMode:
+    def test_values(self):
+        assert AgentMode.COPILOT_CLI == "copilot-cli"
+        assert AgentMode.COPILOT_PLUGIN == "copilot-plugin"
+        assert AgentMode.NONE == "none"
+
+    def test_from_string(self):
+        assert AgentMode("copilot-cli") == AgentMode.COPILOT_CLI
+        assert AgentMode("copilot-plugin") == AgentMode.COPILOT_PLUGIN
+
+
 class TestGlobalConfig:
     def test_defaults(self):
         cfg = GlobalConfig()
@@ -278,10 +348,20 @@ class TestGlobalConfig:
         assert cfg.auto_open_ide is True
         assert cfg.android_cli_version == ""
         assert cfg.skills_repo_url == "https://github.com/android/skills"
+        assert cfg.agent_mode == "copilot-cli"
+        assert cfg.android_cli_enabled is True
 
     def test_ide_choice(self):
         cfg = GlobalConfig(default_ide=IDEChoice.ANDROID_STUDIO)
         assert cfg.default_ide == "android"
+
+    def test_agent_mode_field(self):
+        cfg = GlobalConfig(agent_mode=AgentMode.COPILOT_PLUGIN)
+        assert cfg.agent_mode == "copilot-plugin"
+
+    def test_android_cli_disabled(self):
+        cfg = GlobalConfig(android_cli_enabled=False)
+        assert cfg.android_cli_enabled is False
 
 
 class TestProjectLocalConfig:
@@ -289,6 +369,11 @@ class TestProjectLocalConfig:
         cfg = ProjectLocalConfig()
         assert cfg.last_session_id is None
         assert cfg.notes == ""
+        assert cfg.android_cli_enabled is None  # None = defer to GlobalConfig
+
+    def test_android_cli_override(self):
+        cfg = ProjectLocalConfig(android_cli_enabled=False)
+        assert cfg.android_cli_enabled is False
 
 
 # ---------------------------------------------------------------------------

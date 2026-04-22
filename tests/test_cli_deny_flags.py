@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from koteguard.launcher import build_copilot_cli_command, _DENY_TOOLS
+from koteguard.models import AgentMode
 
 
 # ---------------------------------------------------------------------------
@@ -16,6 +17,18 @@ from koteguard.launcher import build_copilot_cli_command, _DENY_TOOLS
 
 
 class TestBuildCopilotCliCommand:
+    def test_returns_none_for_plugin_mode(self, tmp_path):
+        result = build_copilot_cli_command(tmp_path, agent_mode=AgentMode.COPILOT_PLUGIN)
+        assert result is None
+
+    def test_returns_none_for_none_mode(self, tmp_path):
+        result = build_copilot_cli_command(tmp_path, agent_mode=AgentMode.NONE)
+        assert result is None
+
+    def test_returns_string_for_cli_mode(self, tmp_path):
+        result = build_copilot_cli_command(tmp_path, agent_mode=AgentMode.COPILOT_CLI)
+        assert isinstance(result, str)
+
     def test_contains_copilot_binary(self, tmp_path):
         cmd = build_copilot_cli_command(tmp_path)
         assert "copilot" in cmd

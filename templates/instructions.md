@@ -16,6 +16,12 @@ $tasks
 
 $definition_of_done
 
+## Spec Updates (IMPORTANT)
+
+When you complete a task, open `PLAN.md` and find the task in the `---` YAML block at the top.
+Set `done: true` for that task entry. **Do not reformat any other part of the YAML block.**
+Example: find `- id: t1` and change `done: false` to `done: true`.
+
 ## Constraints
 
 - Only modify files relevant to the tasks above.

@@ -9,7 +9,7 @@ from typing import Any
 
 import tomli_w
 
-from koteguard.models import GlobalConfig, ProjectLocalConfig
+from koteguard.models import AgentMode, GlobalConfig, ProjectLocalConfig
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -153,6 +153,25 @@ def read_session_audit(session_id: str) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 pass
     return entries
+
+
+# ---------------------------------------------------------------------------
+# Feature-flag helpers
+# ---------------------------------------------------------------------------
+
+
+def resolve_android_cli_enabled(project_root: Path) -> bool:
+    """Return effective android_cli_enabled: project local → global → default True."""
+    local = load_project_config(project_root)
+    if local.android_cli_enabled is not None:
+        return local.android_cli_enabled
+    return load_global_config().android_cli_enabled
+
+
+def resolve_agent_mode(project_root: Path | None = None) -> AgentMode:
+    """Return effective agent mode from global config."""
+    cfg = load_global_config()
+    return AgentMode(cfg.agent_mode)
 
 
 # ---------------------------------------------------------------------------

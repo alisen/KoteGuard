@@ -92,6 +92,13 @@ def prep(
         bool,
         typer.Option("--android-first", help="Enable Android skills wizard"),
     ] = False,
+    agent_mode_flag: Annotated[
+        Optional[str],
+        typer.Option(
+            "--agent-mode",
+            help="Agent mode override: copilot-cli | copilot-plugin | none",
+        ),
+    ] = None,
 ) -> None:
     """Full interactive wizard: analyse → plan → worktree → launch."""
     import questionary
@@ -100,25 +107,31 @@ def prep(
         ensure_project_gitignore,
         load_project_config,
         project_kote_dir,
+        resolve_agent_mode,
+        resolve_android_cli_enabled,
         save_project_config,
     )
-    from koteguard.launcher import IDELauncher, pick_ide
-    from koteguard.models import IDEChoice, PlanModel, ProjectType
+    from koteguard.launcher import IDELauncher, build_copilot_cli_command
+    from koteguard.models import AgentMode, IDEChoice, PlanModel, PlanTask, ProjectType, TaskModel
     from koteguard.planning import (
         render_copilot_instructions,
         render_plan,
         render_security_instructions,
+        render_task,
         workspace_from_project_info,
         render_workspace,
     )
     from koteguard.project_scanner import ProjectScanner
     from koteguard.sensitive_files import SensitiveFileHandler
-    from koteguard.templates import get_template, write_template
+    from koteguard.templates import get_template
     from koteguard.worktree import WorktreeEngine
 
     _print_banner()
     project_root = _require_git_repo(project or Path.cwd())
     kote_dir = project_kote_dir(project_root)
+
+    # ── Resolve feature flags ────────────────────────────────────────────
+    android_cli_enabled = resolve_android_cli_enabled(project_root)
 
     # ── Phase 0: Project analysis ────────────────────────────────────────
     console.print("\n[bold cyan]Phase 0:[/] Analysing project…")
@@ -126,7 +139,7 @@ def prep(
     workspace_path = kote_dir / "WORKSPACE.md"
     workspace_exists = workspace_path.exists() and not reconfigure
 
-    scanner = ProjectScanner(project_root)
+    scanner = ProjectScanner(project_root, android_cli_enabled=android_cli_enabled)
     info = scanner.scan()
 
     console.print(
@@ -135,7 +148,7 @@ def prep(
     )
     console.print(f"  Project name: [bold]{info.project_name}[/]")
 
-    if info.android_cli_available:
+    if android_cli_enabled and info.android_cli_available:
         console.print("  Android CLI: [green]✓ available[/]")
     if info.detected_skills:
         console.print(f"  Detected skills: [dim]{', '.join(info.detected_skills)}[/]")
@@ -176,6 +189,26 @@ def prep(
         ).ask()
         selected_skills = choices or []
 
+    # ── Agent mode selection ─────────────────────────────────────────────
+    if agent_mode_flag:
+        try:
+            chosen_mode = AgentMode(agent_mode_flag)
+        except ValueError:
+            err_console.print(f"[red]Unknown agent mode:[/] {agent_mode_flag}")
+            raise typer.Exit(1)
+    else:
+        default_mode = resolve_agent_mode(project_root)
+        mode_answer = questionary.select(
+            "How will the agent run?",
+            choices=[
+                questionary.Choice("Copilot CLI (terminal, deny-tool flags)", value="copilot-cli"),
+                questionary.Choice("Copilot Plugin (IDE chat panel)", value="copilot-plugin"),
+                questionary.Choice("None (inject instructions only)", value="none"),
+            ],
+            default=default_mode.value,
+        ).ask()
+        chosen_mode = AgentMode(mode_answer or "copilot-cli")
+
     # ── Phase 1: Interactive planning ────────────────────────────────────
     console.print("\n[bold cyan]Phase 1:[/] Planning\n")
 
@@ -193,9 +226,14 @@ def prep(
         tasks_raw = questionary.text(
             "List tasks (comma-separated, or press Enter for a single task)"
         ).ask()
-        tasks = [t.strip() for t in (tasks_raw or "").split(",") if t.strip()]
-        if not tasks:
-            tasks = [plan_title]
+        task_strings = [t.strip() for t in (tasks_raw or "").split(",") if t.strip()]
+        if not task_strings:
+            task_strings = [plan_title]
+        # Build PlanTask objects with auto-IDs — these are the spec items
+        tasks = [
+            PlanTask(id=f"t{i}", description=desc, done=False)
+            for i, desc in enumerate(task_strings, 1)
+        ]
 
         dod_raw = questionary.text("Definition of done (comma-separated)").ask()
         dod = [d.strip() for d in (dod_raw or "").split(",") if d.strip()]
@@ -253,6 +291,7 @@ def prep(
     meta = engine.create_worktree(
         task_description=plan_title,
         plan_title=plan_title,
+        agent_mode=chosen_mode,
     )
 
     console.print(f"  Worktree: [green]{meta.worktree_path}[/]")
@@ -264,17 +303,16 @@ def prep(
     plan_file.write_text(plan_md, encoding="utf-8")
     console.print("  Wrote [green]PLAN.md[/] → worktree")
 
-    # Write TASK.md via templates.py
-    task_constraints = "\n".join(f"- {c}" for c in ["Stay on the assigned branch", "No git push"])
+    # Write TASK.md via render_task() (YAML front-matter spec)
     try:
-        write_template(
-            "TASK.md",
-            Path(meta.worktree_path) / "TASK.md",
-            description=plan_title,
+        task_model = TaskModel(
             session_id=meta.session_id,
+            description=plan_title,
             context=f"Project: {ws_model.project_name}. Tech: {', '.join(ws_model.tech_stack[:3])}",
-            constraints=task_constraints,
+            constraints=["Stay on the assigned branch", "No git push"],
         )
+        task_md_content = render_task(task_model)
+        (Path(meta.worktree_path) / "TASK.md").write_text(task_md_content, encoding="utf-8")
         console.print("  Wrote [green]TASK.md[/] → worktree")
     except Exception:
         pass
@@ -297,14 +335,19 @@ def prep(
         console.print(f"  Created {len(stubs)} sensitive-file stub(s)")
 
     # Inject Copilot instructions
-    copilot_instructions = render_copilot_instructions(plan, ws_model, meta.session_id)
+    copilot_instructions = render_copilot_instructions(
+        plan, ws_model, meta.session_id, android_cli_enabled=android_cli_enabled
+    )
     instr_dir = Path(meta.worktree_path) / ".github"
     instr_dir.mkdir(parents=True, exist_ok=True)
     (instr_dir / "copilot-instructions.md").write_text(copilot_instructions, encoding="utf-8")
     sec_dir = instr_dir / "instructions"
     sec_dir.mkdir(parents=True, exist_ok=True)
     (sec_dir / "security.instructions.md").write_text(
-        render_security_instructions(info.project_type.value), encoding="utf-8"
+        render_security_instructions(
+            info.project_type.value, android_cli_enabled=android_cli_enabled
+        ),
+        encoding="utf-8",
     )
     console.print("  Wrote [green]Copilot instructions[/]")
 
@@ -327,18 +370,29 @@ def prep(
     # ── Summary ──────────────────────────────────────────────────────────
     console.print()
     console.rule("[green]Session Ready[/]")
-    console.print(f"\n[bold]Session ID:[/] {meta.session_id}")
-    console.print(f"[bold]Worktree:[/]   {meta.worktree_path}")
-    console.print(f"\nTo enter the worktree:\n  [bold]cd {meta.worktree_path}[/]\n")
+    console.print(f"\n[bold]Session ID:[/]  {meta.session_id}")
+    console.print(f"[bold]Worktree:[/]    {meta.worktree_path}")
+    console.print(f"[bold]Agent Mode:[/]  {chosen_mode.value}\n")
+
+    # Mode-appropriate next step
+    if chosen_mode == AgentMode.COPILOT_CLI:
+        copilot_cmd = build_copilot_cli_command(Path(meta.worktree_path), agent_mode=chosen_mode)
+        console.print("[bold]Run Copilot CLI:[/]")
+        console.print(f"  [green]{copilot_cmd}[/]\n")
+    elif chosen_mode == AgentMode.COPILOT_PLUGIN:
+        console.print(
+            f"[bold]Next step:[/] Open your IDE at the worktree path and use the Copilot chat panel:\n"
+            f"  [dim]{meta.worktree_path}[/]\n"
+        )
+    else:  # none
+        console.print(f"[bold]Next step:[/]\n  [bold]cd {meta.worktree_path}[/]\n")
 
     # Auto-launch IDE
     ide_choice_str = ide or "auto"
-    from koteguard.models import IDEChoice as _IDEChoice
-
     try:
-        ide_enum = _IDEChoice(ide_choice_str)
+        ide_enum = IDEChoice(ide_choice_str)
     except ValueError:
-        ide_enum = _IDEChoice.AUTO
+        ide_enum = IDEChoice.AUTO
 
     launcher = IDELauncher(Path(meta.worktree_path))
     if launcher.launch_ide(ide_enum):
@@ -431,15 +485,28 @@ def cli(
         err_console.print("[red]No active session found.[/]")
         raise typer.Exit(1)
 
+    from koteguard.models import AgentMode as _AgentMode
+
     worktree_path = Path(meta.worktree_path)
     launcher = IDELauncher(worktree_path)
-    copilot_cmd = build_copilot_cli_command(worktree_path)
+    mode = _AgentMode(meta.agent_mode) if meta.agent_mode else _AgentMode.COPILOT_CLI
 
-    console.print(f"[bold]Session:[/]  {meta.session_id}")
-    console.print(f"[bold]Worktree:[/] {worktree_path}")
-    console.print(f"\n[bold]Run Copilot CLI:[/]")
-    console.print(f"  [green]{copilot_cmd}[/]\n")
-    launcher.open_terminal()
+    console.print(f"[bold]Session:[/]    {meta.session_id}")
+    console.print(f"[bold]Worktree:[/]   {worktree_path}")
+    console.print(f"[bold]Agent Mode:[/] {mode.value}\n")
+
+    copilot_cmd = build_copilot_cli_command(worktree_path, agent_mode=mode)
+
+    if copilot_cmd is not None:
+        console.print("[bold]Run Copilot CLI:[/]")
+        console.print(f"  [green]{copilot_cmd}[/]\n")
+        launcher.open_terminal()
+    elif mode == _AgentMode.COPILOT_PLUGIN:
+        console.print(
+            "[bold]Next step:[/] Open your IDE at the worktree path and use the Copilot chat panel."
+        )
+    else:
+        console.print(f"[bold]Next step:[/]\n  cd {worktree_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +527,7 @@ def status() -> None:
     table.add_column("Project")
     table.add_column("Status")
     table.add_column("Session Age")
+    table.add_column("Agent Mode")
     table.add_column("Android CLI")
     table.add_column("Skills")
     table.add_column("Context Pressure")
@@ -496,6 +564,9 @@ def status() -> None:
         else:
             age_str = "unknown"
 
+        # Agent mode
+        agent_mode_str = str(s.agent_mode) if hasattr(s, "agent_mode") and s.agent_mode else "copilot-cli"
+
         # Android CLI
         android_cli_str = "[green]✓[/]" if s.android_cli_available else "[red]✗[/]"
 
@@ -522,6 +593,7 @@ def status() -> None:
             s.project_slug,
             f"[{style}]{s.status}[/]" if style else str(s.status),
             age_str,
+            agent_mode_str,
             android_cli_str,
             skills_str,
             pressure_str,
@@ -786,7 +858,9 @@ def android_skills(
     project_root = project or Path.cwd()
     suggested: list[str] = []
     try:
-        scanner = ProjectScanner(project_root)
+        from koteguard.config import resolve_android_cli_enabled as _resolve_cli
+        _android_cli_enabled = _resolve_cli(project_root)
+        scanner = ProjectScanner(project_root, android_cli_enabled=_android_cli_enabled)
         info = scanner.scan()
         suggested = info.detected_skills
     except Exception:

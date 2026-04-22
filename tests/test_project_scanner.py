@@ -219,6 +219,25 @@ class TestAndroidCLIDetection:
             result = scanner._detect_android_cli()
         assert result is True
 
+    def test_android_cli_disabled_flag_forces_false(self, tmp_path):
+        """When android_cli_enabled=False, _detect_android_cli returns False regardless."""
+        from unittest.mock import patch
+
+        scanner = ProjectScanner(tmp_path, android_cli_enabled=False)
+        with patch("koteguard.project_scanner.shutil.which", return_value="/usr/local/bin/android"):
+            result = scanner._detect_android_cli()
+        assert result is False
+
+    def test_scan_with_cli_disabled_reports_unavailable(self, tmp_path):
+        """android_cli_available should be False when android_cli_enabled=False even if CLI exists."""
+        from unittest.mock import patch
+
+        _write(tmp_path / "build.gradle", "")
+        scanner = ProjectScanner(tmp_path, android_cli_enabled=False)
+        with patch("koteguard.project_scanner.shutil.which", return_value="/usr/local/bin/android"):
+            info = scanner.scan()
+        assert info.android_cli_available is False
+
 
 # ---------------------------------------------------------------------------
 # Skills suggestion
