@@ -6,7 +6,7 @@ import json
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +14,8 @@ import git
 
 from koteguard.config import (
     SESSIONS_DIR,
-    WORKTREES_DIR,
-    append_audit,
+    WORKTREES_DIR,  # noqa: F401 — imported for test-patching
+    append_audit,  # noqa: F401 — imported for test-patching
     append_session_audit,
     load_global_config,
 )
@@ -97,7 +97,7 @@ class WorktreeEngine:
 
         if not session_id:
             session_id = str(uuid.uuid4())[:8]
-        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
         project_slug = _slugify(project_root.name)
         branch_name = f"kote/{session_id}-{_slugify(task_description)[:30]}"
 
@@ -130,7 +130,7 @@ class WorktreeEngine:
         self._create_session_dirs(session_id)
 
         first_entry: dict[str, Any] = {
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "timestamp": datetime.now(tz=UTC).isoformat(),
             "event": "session_created",
             "session_id": session_id,
             "details": {
@@ -210,11 +210,11 @@ class WorktreeEngine:
         self._remove_worktree(meta)
 
         meta.status = SessionStatus.COMPLETED
-        meta.completed_at = datetime.now(tz=timezone.utc)
+        meta.completed_at = datetime.now(tz=UTC)
         save_session(meta)
 
         entry: dict[str, Any] = {
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "timestamp": datetime.now(tz=UTC).isoformat(),
             "event": "worktree_accepted",
             "session_id": session_id,
             "details": {"history_dir": str(history_dir)},
@@ -228,7 +228,6 @@ class WorktreeEngine:
         if not meta:
             return False
 
-        worktree_path = Path(meta.worktree_path)
         project_root = Path(meta.project_root)
 
         # Archive audit trail on discard too
@@ -238,11 +237,11 @@ class WorktreeEngine:
         self._remove_worktree(meta)
 
         meta.status = SessionStatus.DISCARDED
-        meta.completed_at = datetime.now(tz=timezone.utc)
+        meta.completed_at = datetime.now(tz=UTC)
         save_session(meta)
 
         entry: dict[str, Any] = {
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "timestamp": datetime.now(tz=UTC).isoformat(),
             "event": "worktree_discarded",
             "session_id": session_id,
         }
@@ -286,7 +285,7 @@ class WorktreeEngine:
 
     def _archive_discard(self, session_id: str, history_dir: Path) -> None:
         """On discard: copy PLAN.md + audit.jsonl only."""
-        from koteguard.config import SESSIONS_DIR as _SESSIONS_DIR, WORKTREES_DIR as _WORKTREES_DIR
+        from koteguard.config import SESSIONS_DIR as _SESSIONS_DIR
 
         history_dir.mkdir(parents=True, exist_ok=True)
 
@@ -327,6 +326,6 @@ class WorktreeEngine:
             pass
 
     def _history_dir(self, project_root: Path, session_id: str) -> Path:
-        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
         slug = _slugify(session_id)
         return project_root / ".kote" / "history" / f"{timestamp}-{slug}"

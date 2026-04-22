@@ -15,11 +15,10 @@ from koteguard.planning import (
 )
 from koteguard.validation import (
     ValidationResult,
-    _task_keywords,
     _file_matches_task,
+    _task_keywords,
     validate_changes_against_plan,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

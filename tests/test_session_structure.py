@@ -11,7 +11,6 @@ import pytest
 from koteguard.models import SessionMeta
 from koteguard.worktree import WorktreeEngine
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -133,7 +132,7 @@ class TestSessionAuditLog:
 
         audit_path = sessions_dir / "audit-01" / "logs" / "audit.jsonl"
         assert audit_path.exists()
-        lines = [json.loads(l) for l in audit_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(ln) for ln in audit_path.read_text().splitlines() if ln.strip()]
         assert len(lines) == 1
         assert lines[0]["event"] == "session_created"
 
@@ -153,7 +152,7 @@ class TestSessionAuditLog:
                 })
 
         audit_path = sessions_dir / "accum-01" / "logs" / "audit.jsonl"
-        lines = [json.loads(l) for l in audit_path.read_text().splitlines() if l.strip()]
+        lines = [json.loads(ln) for ln in audit_path.read_text().splitlines() if ln.strip()]
         assert len(lines) == 3
 
     def test_read_session_audit(self, tmp_path):
@@ -193,7 +192,7 @@ class TestValidationReportArchival:
 
     def test_validation_report_archived_on_accept(self, tmp_path):
         """Validation report should be copied to .kote/history/ on accept."""
-        repo = _make_fake_repo(tmp_path)
+        _make_fake_repo(tmp_path)
         sessions_dir = tmp_path / "sessions"
         worktrees_dir = tmp_path / "worktrees"
 
@@ -205,7 +204,7 @@ class TestValidationReportArchival:
         ):
             mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
             engine = WorktreeEngine(tmp_path)
-            meta = engine.create_worktree("archive test", session_id="ar-sess1")
+            engine.create_worktree("archive test", session_id="ar-sess1")
 
             # Create a validation-report.md in output dir
             output_dir = sessions_dir / "ar-sess1" / "output"
@@ -216,7 +215,7 @@ class TestValidationReportArchival:
 
             # Accept (this triggers archival)
             with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
-                ok = engine.accept_worktree("ar-sess1")
+                engine.accept_worktree("ar-sess1")
 
         # The history dir should contain the validation report
         history_root = tmp_path / ".kote" / "history"

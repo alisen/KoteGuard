@@ -3,23 +3,29 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 
 import pytest
 
-from koteguard.validation import (
-    ValidationResult,
-    validate_changes_against_plan,
-    validate_plan_file,
-    validate_workspace_file,
-    validate_skills_compliance,
-    render_validation_report,
-    write_validation_report,
-    write_used_skills_json,
+from koteguard.models import (
+    PlanModel,
+    ProjectInfo,
+    ProjectType,
+    SkillsComplianceResult,
+    WorkspaceModel,
 )
 from koteguard.planning import render_plan, render_workspace
-from koteguard.models import PlanModel, WorkspaceModel, ProjectInfo, ProjectType, SkillsComplianceResult
-
+from koteguard.validation import (
+    ValidationResult,
+    render_validation_report,
+    validate_changes_against_plan,
+    validate_plan_file,
+    validate_skills_compliance,
+    validate_workspace_file,
+    write_used_skills_json,
+    write_validation_report,
+)
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -286,7 +292,7 @@ class TestValidationReport:
                 skills_result=skills_result,
                 worktree_path=tmp_path,
                 plan_path=tmp_path / "PLAN.md",
-                created_at=datetime.now(tz=timezone.utc),
+                created_at=datetime.now(tz=UTC),
             )
 
         assert "Validation Report" in report

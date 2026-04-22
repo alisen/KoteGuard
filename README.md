@@ -1,10 +1,10 @@
 <p align="center">
   <a href="https://koteguard.com"><img src="https://img.shields.io/badge/website-koteguard.com-blue?style=flat-square" alt="koteguard.com"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square" alt="Python 3.12+">
-  <img src="https://img.shields.io/badge/version-1.0.0--alpha.1-orange?style=flat-square" alt="Version">
+  <a href="https://pypi.org/project/koteguard/"><img src="https://img.shields.io/pypi/v/koteguard?style=flat-square&label=version&color=orange" alt="PyPI Version"></a>
   <img src="https://img.shields.io/badge/platform-Android%20%7C%20iOS-green?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="MIT License">
-  <img src="https://img.shields.io/badge/tests-196%20passing-brightgreen?style=flat-square" alt="Tests">
+  <a href="https://github.com/alisen/KoteGuard/actions/workflows/ci.yml"><img src="https://github.com/alisen/KoteGuard/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
 </p>
 
 <h1 align="center">KoteGuard 🛡️</h1>
@@ -55,12 +55,11 @@ pip install koteguard
 
 **Requires Python 3.12+**
 
-Or install from source (alpha branch):
+Or install from source:
 
 ```bash
 git clone https://github.com/alisen/KoteGuard.git
 cd KoteGuard
-git checkout alpha/v1.0.0-alpha.1
 pip install -e ".[dev]"
 ```
 
@@ -326,7 +325,7 @@ git clone https://github.com/alisen/KoteGuard.git
 cd KoteGuard
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest   # 196 tests, all green
+pytest
 ```
 
 ---

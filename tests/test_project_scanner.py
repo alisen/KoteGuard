@@ -13,7 +13,6 @@ from koteguard.project_scanner import (
     _parse_info_plist,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers to build fake project trees
 # ---------------------------------------------------------------------------

@@ -3,40 +3,39 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
 
-class ProjectType(str, Enum):
+class ProjectType(StrEnum):
     ANDROID = "android"
     IOS = "ios"
     MONOREPO = "monorepo"
     UNKNOWN = "unknown"
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     ACTIVE = "active"
     COMPLETED = "completed"
     DISCARDED = "discarded"
     PENDING_REVIEW = "pending_review"
 
 
-class IDEChoice(str, Enum):
+class IDEChoice(StrEnum):
     ANDROID_STUDIO = "android"
     XCODE = "ios"
     AUTO = "auto"
 
 
-class AgentMode(str, Enum):
+class AgentMode(StrEnum):
     """How the Copilot agent is invoked for a session."""
 
     COPILOT_CLI = "copilot-cli"       # terminal: copilot binary with deny-tool flags
@@ -137,7 +136,7 @@ class SessionMeta(BaseModel):
     worktree_path: Path
     branch_name: str
     status: SessionStatus = SessionStatus.ACTIVE
-    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     completed_at: datetime | None = None
     plan_title: str = ""
     ide: IDEChoice = IDEChoice.AUTO
@@ -207,7 +206,7 @@ class UsedSkill(BaseModel):
 
     skill_name: str
     applied_to: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
 class SkillsComplianceResult(BaseModel):
@@ -226,7 +225,7 @@ class SkillsComplianceResult(BaseModel):
 class AuditEntry(BaseModel):
     """A single JSONL audit-log record."""
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     event: str
     session_id: str | None = None
     details: dict[str, Any] = Field(default_factory=dict)

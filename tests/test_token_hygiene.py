@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,7 +30,6 @@ class TestWorkspaceSummaryAppend:
         ws_path.write_text("# KoteGuard KB\n\n## Existing Section\n\nContent.\n", encoding="utf-8")
 
         from koteguard.cli import _append_workspace_summary
-        from unittest.mock import patch
 
         with patch("koteguard.cli.Path.home", return_value=tmp_path):
             # Directly call with the tmp_path workspace
@@ -44,7 +42,7 @@ class TestWorkspaceSummaryAppend:
                 with patch("pathlib.Path.home", return_value=tmp_path):
                     # Simulate what _append_workspace_summary does
                     summary = "Implemented login screen. Key decision: use JWT tokens."
-                    date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    date_str = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
                     section = f"\n## Session Summary ({date_str})\n\n{summary}\n"
                     workspace_path.write_text(workspace_path.read_text() + section, encoding="utf-8")
 
@@ -57,7 +55,7 @@ class TestWorkspaceSummaryAppend:
         ws_path.parent.mkdir(parents=True, exist_ok=True)
 
         summary = "First session. Key decisions: MVVM pattern."
-        date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        date_str = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
         section = f"\n## Session Summary ({date_str})\n\n{summary}\n"
 
         ws_path.write_text(f"# KoteGuard Knowledge Base\n{section}", encoding="utf-8")
@@ -74,12 +72,11 @@ class TestWorkspaceSummaryAppend:
 
 class TestTokenHygieneScore:
     def test_low_pressure_for_new_session(self, tmp_path):
-        from koteguard.validation import render_validation_report, ValidationResult
-        from unittest.mock import patch
+        from koteguard.validation import ValidationResult, render_validation_report
 
         plan_result = ValidationResult()
         changes_result = ValidationResult()
-        created_at = datetime.now(tz=timezone.utc) - timedelta(minutes=30)
+        created_at = datetime.now(tz=UTC) - timedelta(minutes=30)
 
         with patch("koteguard.validation.read_session_audit", return_value=[]):
             report = render_validation_report(
@@ -97,12 +94,11 @@ class TestTokenHygieneScore:
         assert "m" in report  # age in minutes
 
     def test_high_pressure_for_old_session(self, tmp_path):
-        from koteguard.validation import render_validation_report, ValidationResult
-        from unittest.mock import patch
+        from koteguard.validation import ValidationResult, render_validation_report
 
         plan_result = ValidationResult()
         changes_result = ValidationResult()
-        created_at = datetime.now(tz=timezone.utc) - timedelta(days=2)
+        created_at = datetime.now(tz=UTC) - timedelta(days=2)
 
         with patch("koteguard.validation.read_session_audit", return_value=[]):
             report = render_validation_report(
@@ -119,12 +115,11 @@ class TestTokenHygieneScore:
         assert "compact" in report.lower() or "WORKSPACE" in report
 
     def test_medium_pressure(self, tmp_path):
-        from koteguard.validation import render_validation_report, ValidationResult
-        from unittest.mock import patch
+        from koteguard.validation import ValidationResult, render_validation_report
 
         plan_result = ValidationResult()
         changes_result = ValidationResult()
-        created_at = datetime.now(tz=timezone.utc) - timedelta(hours=6)
+        created_at = datetime.now(tz=UTC) - timedelta(hours=6)
 
         with patch("koteguard.validation.read_session_audit", return_value=[]):
             report = render_validation_report(
@@ -148,9 +143,9 @@ class TestTokenHygieneScore:
 class TestStatusTableColumns:
     def test_session_age_formatting(self):
         """Test that session age is formatted correctly."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
 
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
 
         # 30 minutes old
         age_30m = (now - (now - timedelta(minutes=30))).total_seconds()

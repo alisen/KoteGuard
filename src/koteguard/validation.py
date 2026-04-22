@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,6 @@ from koteguard.models import (
     WorkspaceModel,
 )
 from koteguard.planning import parse_plan
-
 
 # ---------------------------------------------------------------------------
 # PLAN.md validation
@@ -264,7 +263,7 @@ def render_validation_report(
     created_at: datetime | None = None,
 ) -> str:
     """Render a complete validation-report.md."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     lines: list[str] = [
         "# Validation Report",
         "",

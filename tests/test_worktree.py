@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from koteguard.models import SessionStatus
+from koteguard.models import SessionMeta, SessionStatus
 from koteguard.worktree import (
     WorktreeEngine,
     _slugify,
@@ -16,8 +16,6 @@ from koteguard.worktree import (
     load_session,
     save_session,
 )
-from koteguard.models import SessionMeta
-
 
 # ---------------------------------------------------------------------------
 # _slugify
@@ -205,7 +203,7 @@ class TestWorktreeEngine:
         repo.git.branch("-D", meta.branch_name)
 
     def test_discard_worktree(self, tmp_path):
-        repo = self._make_fake_repo(tmp_path)
+        self._make_fake_repo(tmp_path)
         worktrees_dir = tmp_path / "worktrees"
         sessions_dir = tmp_path / "sessions"
 
@@ -218,7 +216,7 @@ class TestWorktreeEngine:
         ):
             mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
             engine = WorktreeEngine(tmp_path)
-            meta = engine.create_worktree("test task", session_id="disc01")
+            engine.create_worktree("test task", session_id="disc01")
             ok = engine.discard_worktree("disc01")
 
         assert ok is True
@@ -236,7 +234,7 @@ class TestWorktreeEngine:
 
     def test_history_archival_on_discard(self, tmp_path):
         """Discard should archive PLAN.md + audit.jsonl to .kote/history/."""
-        repo = self._make_fake_repo(tmp_path)
+        self._make_fake_repo(tmp_path)
         worktrees_dir = tmp_path / "worktrees"
         sessions_dir = tmp_path / "sessions"
 
@@ -249,7 +247,7 @@ class TestWorktreeEngine:
         ):
             mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
             engine = WorktreeEngine(tmp_path)
-            meta = engine.create_worktree("archive test", session_id="arch01")
+            engine.create_worktree("archive test", session_id="arch01")
 
             # Simulate a PLAN.md in the session context dir
             context_dir = sessions_dir / "arch01" / "context"

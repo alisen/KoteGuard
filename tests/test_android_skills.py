@@ -12,7 +12,6 @@ from koteguard.models import PlanModel, ProjectInfo, ProjectType, SkillsComplian
 from koteguard.project_scanner import ProjectScanner
 from koteguard.validation import validate_skills_compliance, write_used_skills_json
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

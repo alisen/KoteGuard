@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"   # triggers on v1.0.0a3, v1.0.0, etc.
+
+jobs:
+  release:
+    name: Build & publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi         # matches the "pypi" environment in GitHub Settings → Environments
+    permissions:
+      contents: write          # needed to create a GitHub Release
+      id-token: write          # needed for PyPI trusted publishing (no token required)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Uses PyPI Trusted Publishing — no API token needed at all.
+        # Set it up once at: pypi.org/manage/project/koteguard/settings/publishing/
+        # Add publisher: owner=alisen, repo=KoteGuard, workflow=release.yml
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true   # auto-generates notes from commits

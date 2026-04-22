@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import shutil
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich import print as rprint
@@ -40,6 +39,47 @@ err_console = Console(stderr=True)
 # ---------------------------------------------------------------------------
 
 
+def _build_starter_message(info: ProjectInfo, plan: PlanModel) -> str:  # noqa: F821
+    """Build a compact, context-aware, token-friendly starter prompt.
+
+    Uses the scan result (``info``) and the approved plan to generate a
+    single plain-text message the user can paste directly into the agent.
+    """
+
+    parts: list[str] = ["Read PLAN.md and TASK.md."]
+
+    # Project context — only include fields that were actually detected
+    ctx: list[str] = [f"Project: {info.project_name} ({info.project_type.value}"]
+    if info.project_type.value == "android":
+        if info.android_min_sdk:
+            ctx.append(f"minSdk={info.android_min_sdk}")
+        if info.android_target_sdk:
+            ctx.append(f"targetSdk={info.android_target_sdk}")
+        if info.android_compile_sdk:
+            ctx.append(f"compileSdk={info.android_compile_sdk}")
+    elif info.project_type.value == "ios":
+        if info.ios_deployment_target:
+            ctx.append(f"minOS={info.ios_deployment_target}")
+    parts.append(", ".join(ctx) + ")")
+
+    # Skills — only if selected
+    if plan.android_skills:
+        parts.append(f"Skill guides injected: {', '.join(plan.android_skills)}. Refer to them.")
+
+    # Tasks with their spec IDs
+    for t in plan.tasks:
+        parts.append(f"Task [{t.id}]: {t.description}")
+
+    # SDD instruction
+    parts.append("After each task mark done: true in the PLAN.md YAML block.")
+
+    # Definition of done
+    if plan.definition_of_done:
+        parts.append(f"Done when: {'; '.join(plan.definition_of_done)}.")
+
+    return "\n".join(parts)
+
+
 def _require_git_repo(path: Path = Path.cwd()) -> Path:
     """Exit with an error if path is not inside a git repo."""
     import git
@@ -52,7 +92,7 @@ def _require_git_repo(path: Path = Path.cwd()) -> Path:
             "[bold red]Error:[/] Not inside a git repository. "
             "Run `git init` first."
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def _print_banner() -> None:
@@ -73,7 +113,7 @@ def _print_banner() -> None:
 @app.command()
 def prep(
     project: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("--project", "-p", help="Project root (default: cwd)"),
     ] = None,
     reconfigure: Annotated[
@@ -81,7 +121,7 @@ def prep(
         typer.Option("--reconfigure", help="Re-run Phase 0 project analysis"),
     ] = False,
     ide: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--ide", help="IDE override: android | ios"),
     ] = None,
     dry_run: Annotated[
@@ -93,7 +133,7 @@ def prep(
         typer.Option("--android-first", help="Enable Android skills wizard"),
     ] = False,
     agent_mode_flag: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--agent-mode",
             help="Agent mode override: copilot-cli | copilot-plugin | none",
@@ -118,8 +158,8 @@ def prep(
         render_plan,
         render_security_instructions,
         render_task,
-        workspace_from_project_info,
         render_workspace,
+        workspace_from_project_info,
     )
     from koteguard.project_scanner import ProjectScanner
     from koteguard.sensitive_files import SensitiveFileHandler
@@ -195,7 +235,7 @@ def prep(
             chosen_mode = AgentMode(agent_mode_flag)
         except ValueError:
             err_console.print(f"[red]Unknown agent mode:[/] {agent_mode_flag}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
     else:
         default_mode = resolve_agent_mode(project_root)
         mode_answer = questionary.select(
@@ -387,6 +427,11 @@ def prep(
     else:  # none
         console.print(f"[bold]Next step:[/]\n  [bold]cd {meta.worktree_path}[/]\n")
 
+    # ── Starter message ───────────────────────────────────────────────────
+    console.rule("[dim]Starter Message[/]")
+    console.print(_build_starter_message(info, plan))
+    console.rule()
+
     # Auto-launch IDE
     ide_choice_str = ide or "auto"
     try:
@@ -409,11 +454,11 @@ def prep(
 @app.command()
 def ide(
     session: Annotated[
-        Optional[str],
+        str | None,
         typer.Argument(help="Session ID (default: most recent active session)"),
     ] = None,
     ide_override: Annotated[
-        Optional[str],
+        str | None,
         typer.Option("--ide", help="IDE override: android | ios"),
     ] = None,
 ) -> None:
@@ -433,12 +478,12 @@ def ide(
 
     if not meta:
         err_console.print("[red]No active session found.[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     worktree_path = Path(meta.worktree_path)
     if not worktree_path.exists():
         err_console.print(f"[red]Worktree not found:[/] {worktree_path}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     ide_str = ide_override or "auto"
     try:
@@ -464,7 +509,7 @@ def ide(
 @app.command()
 def cli(
     session: Annotated[
-        Optional[str],
+        str | None,
         typer.Argument(help="Session ID (default: most recent active session)"),
     ] = None,
 ) -> None:
@@ -483,7 +528,7 @@ def cli(
 
     if not meta:
         err_console.print("[red]No active session found.[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     from koteguard.models import AgentMode as _AgentMode
 
@@ -520,7 +565,7 @@ def status() -> None:
     from koteguard.worktree import list_sessions
 
     sessions = list_sessions()
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     table = Table(title="KoteGuard Sessions", show_header=True, header_style="bold cyan")
     table.add_column("Session ID", style="bold")
@@ -552,7 +597,7 @@ def status() -> None:
 
         # Session age
         if isinstance(s.created_at, datetime):
-            age_seconds = (now - s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else (now - s.created_at)).total_seconds()
+            age_seconds = (now - s.created_at.replace(tzinfo=UTC) if s.created_at.tzinfo is None else (now - s.created_at)).total_seconds()
             if age_seconds < 3600:
                 age_str = f"{int(age_seconds / 60)}m ago"
             elif age_seconds < 86400:
@@ -620,7 +665,7 @@ def status() -> None:
 @app.command()
 def cleanup(
     session: Annotated[
-        Optional[str],
+        str | None,
         typer.Argument(help="Session ID to clean up"),
     ] = None,
     accept: Annotated[
@@ -645,14 +690,12 @@ def cleanup(
     ] = False,
 ) -> None:
     """Cleanup agent worktrees: --accept or --discard."""
-    import questionary
 
-    from koteguard.config import SESSIONS_DIR
     from koteguard.worktree import WorktreeEngine, list_sessions, load_session
 
     if not accept and not discard:
         err_console.print("[red]Specify --accept or --discard[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     engine = WorktreeEngine()
 
@@ -681,8 +724,8 @@ def cleanup(
                 # Auto-run validation
                 from koteguard.validation import (
                     render_validation_report,
-                    validate_plan_file,
                     validate_changes_against_plan,
+                    validate_plan_file,
                     write_validation_report,
                 )
 
@@ -758,7 +801,7 @@ def cleanup(
 def _append_workspace_summary(summary: str) -> None:
     """Append a session summary section to ~/.kote/WORKSPACE.md."""
     workspace_path = Path.home() / ".kote" / "WORKSPACE.md"
-    date_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    date_str = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     section = f"\n## Session Summary ({date_str})\n\n{summary}\n"
 
@@ -780,11 +823,11 @@ def _append_workspace_summary(summary: str) -> None:
 @app.command()
 def validate(
     plan_file: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Argument(help="Path to PLAN.md (default: ./PLAN.md)"),
     ] = None,
     workspace_file: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("--workspace", "-w", help="Path to WORKSPACE.md"),
     ] = None,
 ) -> None:
@@ -817,7 +860,7 @@ def validate(
             console.print(f"  [yellow]⚠[/] {warn}")
 
     if not result:
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 # ---------------------------------------------------------------------------
@@ -839,13 +882,13 @@ def version() -> None:
 @android_app.command("skills")
 def android_skills(
     project: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("--project", "-p", help="Project root (default: cwd)"),
     ] = None,
 ) -> None:
     """List available Android skills and suggest relevant ones for the current project."""
-    from koteguard.templates import _templates_dir
     from koteguard.project_scanner import ProjectScanner
+    from koteguard.templates import _templates_dir
 
     table = Table(
         title="Android Skills", show_header=True, header_style="bold cyan"
@@ -913,7 +956,6 @@ def android_skills(
 @android_app.command("docs")
 def android_docs() -> None:
     """Show Android Knowledge Base status and documentation links."""
-    from koteguard.project_scanner import ProjectScanner
     from koteguard.config import check_worktree_context
 
     table = Table(title="Android Documentation", show_header=True, header_style="bold cyan")
