@@ -40,11 +40,14 @@ KoteGuard runs Copilot agents in isolated **git worktrees** so they can never ac
 - 🔍 **Smart project analysis** — auto-detects Android/iOS, parses `build.gradle` + `Info.plist`, scans docs
 - 📋 **Interactive planning wizard** — builds `PLAN.md` with a refine loop and a hard `YES` gate
 - 🌿 **Isolated git worktrees** — agent works on a dedicated branch, never touches `main`
-- 🔒 **Sensitive file stubs** — `.jks`, `google-services.json`, `.p12` replaced with safe placeholders
+- 🔒 **Sensitive file stubs** — `.jks`, `google-services.json`, `.p12`, `.env` replaced with safe placeholders
 - 🤖 **Copilot CLI ready** — generates the complete `copilot --deny-tool=...` command for you
-- 📊 **Session tracking** — rich status table with age, Android CLI status, skills loaded, context pressure
+- 📊 **Session tracking** — rich status table with plan title, age, Android CLI status, skills loaded, context pressure
 - ✅ **Auto-validation** — validates PLAN.md + changed files on `kote cleanup --accept`
-- 🧰 **Android Skills** — bundled SKILL.md guides for Navigation 3, Compose, AGP 9, Edge-to-Edge
+- 🧰 **Android Skills** — official guides synced nightly from `github.com/android/skills`; `kote android update` fetches the latest
+- 🍎 **iOS Skills** — bundled SwiftUI, Swift Concurrency, and XCTest guides; auto-detected from your Swift source
+- 🔧 **Global config** — `kote init` wizard sets agent mode, IDE, and worktrees directory
+- 🗂️ **Session hygiene** — `kote sessions prune` removes stale session metadata on your schedule
 - 🧠 **Token hygiene** — `--compact` saves session knowledge back into `WORKSPACE.md`
 
 ---
@@ -81,6 +84,9 @@ pip install /path/to/KoteGuard
 ## Quick Start
 
 ```bash
+# One-time setup (optional — configure your defaults)
+kote init
+
 cd your-android-or-ios-project
 
 # 1. Run the wizard — it detects your project, plans, creates the worktree
@@ -319,11 +325,15 @@ templates/
 ├── security.instructions.md         # applyTo: "**/*" · Android + iOS deny rules
 ├── AGENTS.md
 ├── config.toml
-└── android-skills/
-    ├── navigation3.skill.md
-    ├── edge-to-edge.skill.md
-    ├── agp9.skill.md
-    └── compose-migration.skill.md
+├── android-skills/
+│   ├── navigation3.skill.md
+│   ├── edge-to-edge.skill.md
+│   ├── agp9.skill.md
+│   └── compose-migration.skill.md
+└── ios-skills/
+    ├── swiftui-patterns.skill.md
+    ├── swift-concurrency.skill.md
+    └── xctest.skill.md
 ```
 
 ---
@@ -347,11 +357,19 @@ KoteGuard supports three ways to run the Copilot agent. Set the default in `~/.k
 | `copilot-plugin` | IDE chat panel (Android Studio, VS Code) | Open IDE at worktree path |
 | `none` | Instructions injected only — bring your own agent | `cd <worktree>` |
 
-**Set default in `~/.kote/config.toml`:**
+**Set defaults interactively:**
+
+```bash
+kote init   # guided wizard — sets all fields below
+```
+
+**Or edit `~/.kote/config.toml` directly:**
 
 ```toml
 agent_mode = "copilot-cli"   # copilot-cli | copilot-plugin | none
+default_ide = "auto"         # auto | android | ios
 android_cli_enabled = true
+worktrees_dir = "~/.kote/worktrees"
 ```
 
 **Override per session:**
