@@ -126,8 +126,10 @@ class TestSessionAuditLog:
             "details": {"branch": "kote/audit-01-test"},
         }
 
-        with patch("koteguard.config.SESSIONS_DIR", sessions_dir), \
-             patch("koteguard.config.AUDIT_LOG_PATH", tmp_path / "audit.jsonl"):
+        with (
+            patch("koteguard.config.SESSIONS_DIR", sessions_dir),
+            patch("koteguard.config.AUDIT_LOG_PATH", tmp_path / "audit.jsonl"),
+        ):
             append_session_audit("audit-01", entry)
 
         audit_path = sessions_dir / "audit-01" / "logs" / "audit.jsonl"
@@ -141,15 +143,20 @@ class TestSessionAuditLog:
 
         sessions_dir = tmp_path / "sessions"
 
-        with patch("koteguard.config.SESSIONS_DIR", sessions_dir), \
-             patch("koteguard.config.AUDIT_LOG_PATH", tmp_path / "audit.jsonl"):
+        with (
+            patch("koteguard.config.SESSIONS_DIR", sessions_dir),
+            patch("koteguard.config.AUDIT_LOG_PATH", tmp_path / "audit.jsonl"),
+        ):
             for i in range(3):
-                append_session_audit("accum-01", {
-                    "timestamp": f"2024-01-01T0{i}:00:00Z",
-                    "event": f"event_{i}",
-                    "session_id": "accum-01",
-                    "details": {},
-                })
+                append_session_audit(
+                    "accum-01",
+                    {
+                        "timestamp": f"2024-01-01T0{i}:00:00Z",
+                        "event": f"event_{i}",
+                        "session_id": "accum-01",
+                        "details": {},
+                    },
+                )
 
         audit_path = sessions_dir / "accum-01" / "logs" / "audit.jsonl"
         lines = [json.loads(ln) for ln in audit_path.read_text().splitlines() if ln.strip()]
@@ -160,14 +167,19 @@ class TestSessionAuditLog:
 
         sessions_dir = tmp_path / "sessions"
 
-        with patch("koteguard.config.SESSIONS_DIR", sessions_dir), \
-             patch("koteguard.config.AUDIT_LOG_PATH", tmp_path / "audit.jsonl"):
-            append_session_audit("read-01", {
-                "timestamp": "2024-01-01T00:00:00Z",
-                "event": "test_event",
-                "session_id": "read-01",
-                "details": {"key": "value"},
-            })
+        with (
+            patch("koteguard.config.SESSIONS_DIR", sessions_dir),
+            patch("koteguard.config.AUDIT_LOG_PATH", tmp_path / "audit.jsonl"),
+        ):
+            append_session_audit(
+                "read-01",
+                {
+                    "timestamp": "2024-01-01T00:00:00Z",
+                    "event": "test_event",
+                    "session_id": "read-01",
+                    "details": {"key": "value"},
+                },
+            )
             entries = read_session_audit("read-01")
 
         assert len(entries) == 1

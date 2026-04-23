@@ -46,6 +46,35 @@ _SKILL_KEYWORDS: dict[str, list[str]] = {
 
 _AGENT_KEYWORDS = ["agent", "copilot", "ai assistant", "llm", "cursor", "firebender"]
 
+# ---------------------------------------------------------------------------
+# iOS skill detection keywords in Swift source files / Package.swift
+# ---------------------------------------------------------------------------
+
+_IOS_SKILL_KEYWORDS: dict[str, list[str]] = {
+    "swiftui-patterns": [
+        "SwiftUI",
+        "import SwiftUI",
+        "@Observable",
+        "View",
+        "some View",
+    ],
+    "swift-concurrency": [
+        "async ",
+        "await ",
+        "actor ",
+        "Task {",
+        "AsyncStream",
+        "withTaskGroup",
+    ],
+    "xctest": [
+        "import XCTest",
+        "XCTestCase",
+        "XCTAssert",
+        "snapshot",
+        "SnapshotTesting",
+    ],
+}
+
 
 def _find_files(root: Path, pattern: str, max_depth: int = 4) -> list[Path]:
     """Glob helper with depth cap to stay fast."""
@@ -172,9 +201,10 @@ class ProjectScanner:
             info = self._enrich_ios(info)
 
         # Auto-suggest skills based on project features
-        info.detected_skills = list(
-            set(info.detected_skills) | set(self._suggest_skills(info))
-        )
+        info.detected_skills = list(set(info.detected_skills) | set(self._suggest_skills(info)))
+
+        if project_type in (ProjectType.IOS, ProjectType.MONOREPO):
+            info.ios_detected_skills = self._scan_for_ios_skills()
 
         elapsed = (time.monotonic() - t0) * 1000
         info.elapsed_ms = elapsed
@@ -186,9 +216,7 @@ class ProjectScanner:
 
     def _is_android(self) -> bool:
         return any(
-            _has_file(self.root, sig)
-            for sig in _ANDROID_SIGNATURES
-            if not sig.startswith(".")
+            _has_file(self.root, sig) for sig in _ANDROID_SIGNATURES if not sig.startswith(".")
         )
 
     def _is_ios(self) -> bool:
@@ -245,9 +273,7 @@ class ProjectScanner:
         frameworks: list[str] = []
         if project_type == ProjectType.ANDROID:
             frameworks.append("Android SDK")
-            if _has_file(self.root, "build.gradle") or _has_file(
-                self.root, "build.gradle.kts"
-            ):
+            if _has_file(self.root, "build.gradle") or _has_file(self.root, "build.gradle.kts"):
                 frameworks.append("Gradle")
             # Check for Compose usage
             gradle_files = list(self.root.glob("**/*.gradle")) + list(
@@ -278,9 +304,7 @@ class ProjectScanner:
         for child in self.root.iterdir():
             if not child.is_dir() or child.name.startswith("."):
                 continue
-            if (child / "build.gradle").exists() or (
-                child / "build.gradle.kts"
-            ).exists():
+            if (child / "build.gradle").exists() or (child / "build.gradle.kts").exists():
                 subs.append(child.name)
         return subs
 
@@ -313,9 +337,7 @@ class ProjectScanner:
                 pass
 
         # Check build.gradle files for known skill keywords
-        gradle_files = list(self.root.glob("**/*.gradle")) + list(
-            self.root.glob("**/*.gradle.kts")
-        )
+        gradle_files = list(self.root.glob("**/*.gradle")) + list(self.root.glob("**/*.gradle.kts"))
         for gf in gradle_files[:20]:
             try:
                 content = gf.read_text(encoding="utf-8", errors="ignore")
@@ -323,6 +345,33 @@ class ProjectScanner:
                     if skill_name not in found:
                         if any(kw.lower() in content.lower() for kw in keywords):
                             found.append(skill_name)
+            except OSError:
+                pass
+
+        return list(dict.fromkeys(found))
+
+    def _scan_for_ios_skills(self) -> list[str]:
+        """Scan Swift source files for iOS skill keywords."""
+        found: list[str] = []
+        swift_files = list(self.root.rglob("*.swift"))[:30]  # cap for speed
+
+        for sf in swift_files:
+            try:
+                content = sf.read_text(encoding="utf-8", errors="ignore")
+                for skill_name, keywords in _IOS_SKILL_KEYWORDS.items():
+                    if skill_name not in found:
+                        if any(kw in content for kw in keywords):
+                            found.append(skill_name)
+            except OSError:
+                pass
+
+        # Also check Package.swift for dependency hints
+        pkg_swift = self.root / "Package.swift"
+        if pkg_swift.exists():
+            try:
+                content = pkg_swift.read_text(encoding="utf-8", errors="ignore")
+                if "SnapshotTesting" in content and "xctest" not in found:
+                    found.append("xctest")
             except OSError:
                 pass
 
@@ -355,9 +404,7 @@ class ProjectScanner:
                 suggestions.append("compose-migration")
 
         # Check for navigation usage in gradle
-        gradle_files = list(self.root.glob("**/*.gradle")) + list(
-            self.root.glob("**/*.gradle.kts")
-        )
+        gradle_files = list(self.root.glob("**/*.gradle")) + list(self.root.glob("**/*.gradle.kts"))
         for gf in gradle_files[:10]:
             try:
                 content = gf.read_text(encoding="utf-8", errors="ignore")

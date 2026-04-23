@@ -30,6 +30,22 @@ android_app = typer.Typer(
 )
 app.add_typer(android_app, name="android")
 
+ios_app = typer.Typer(
+    name="ios",
+    help="iOS skill guides and project commands",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(ios_app, name="ios")
+
+sessions_app = typer.Typer(
+    name="sessions",
+    help="Manage KoteGuard session metadata",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(sessions_app, name="sessions")
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -88,10 +104,7 @@ def _require_git_repo(path: Path = Path.cwd()) -> Path:
         repo = git.Repo(path, search_parent_directories=True)
         return Path(repo.working_tree_dir)
     except git.InvalidGitRepositoryError:
-        err_console.print(
-            "[bold red]Error:[/] Not inside a git repository. "
-            "Run `git init` first."
-        )
+        err_console.print("[bold red]Error:[/] Not inside a git repository. Run `git init` first.")
         raise typer.Exit(1) from None
 
 
@@ -183,8 +196,7 @@ def prep(
     info = scanner.scan()
 
     console.print(
-        f"  Detected: [bold]{info.project_type.value}[/] "
-        f"(confidence {info.confidence:.0%})"
+        f"  Detected: [bold]{info.project_type.value}[/] (confidence {info.confidence:.0%})"
     )
     console.print(f"  Project name: [bold]{info.project_name}[/]")
 
@@ -208,11 +220,21 @@ def prep(
     selected_skills: list[str] = []
     if android_first and info.project_type in (ProjectType.ANDROID, ProjectType.MONOREPO):
         if not info.android_cli_available:
-            console.print("[yellow]⚠ Android CLI not detected – some features may be unavailable[/]")
+            console.print(
+                "[yellow]⚠ Android CLI not detected – some features may be unavailable[/]"
+            )
 
         console.print("\n[bold cyan]Android Skills:[/] Select skills to enable\n")
+        from koteguard.config import ANDROID_SKILLS_CACHE_DIR
         from koteguard.templates import _templates_dir
-        skills_dir = _templates_dir() / "android-skills"
+
+        # Prefer user-synced skills (kote android update) over bundled templates
+        skills_dir = (
+            ANDROID_SKILLS_CACHE_DIR
+            if ANDROID_SKILLS_CACHE_DIR.exists()
+            and any(ANDROID_SKILLS_CACHE_DIR.glob("*.skill.md"))
+            else _templates_dir() / "android-skills"
+        )
         available_skills: list[str] = []
         if skills_dir.exists():
             available_skills = [
@@ -284,9 +306,7 @@ def prep(
             questionary.text("Estimated time?", default="1–2 hours").ask() or "1–2 hours"
         )
 
-        risks_raw = questionary.text(
-            "Known risks? (comma-separated, or Enter to skip)"
-        ).ask()
+        risks_raw = questionary.text("Known risks? (comma-separated, or Enter to skip)").ask()
         risks = [r.strip() for r in (risks_raw or "").split(",") if r.strip()]
 
         plan = PlanModel(
@@ -354,16 +374,16 @@ def prep(
         task_md_content = render_task(task_model)
         (Path(meta.worktree_path) / "TASK.md").write_text(task_md_content, encoding="utf-8")
         console.print("  Wrote [green]TASK.md[/] → worktree")
-    except Exception:
-        pass
+    except Exception as exc:
+        console.print(f"  [yellow]⚠ Warning:[/] could not write TASK.md: {exc}")
 
     # Write AGENTS.md via templates.py
     try:
         agents_content = get_template("AGENTS.md")
         (Path(meta.worktree_path) / "AGENTS.md").write_text(agents_content, encoding="utf-8")
         console.print("  Wrote [green]AGENTS.md[/] → worktree")
-    except Exception:
-        pass
+    except Exception as exc:
+        console.print(f"  [yellow]⚠ Warning:[/] could not write AGENTS.md: {exc}")
 
     # Write WORKSPACE.md into worktree
     shutil.copy2(workspace_path, Path(meta.worktree_path) / "WORKSPACE.md")
@@ -496,8 +516,7 @@ def ide(
         console.print(f"[green]IDE launched[/] for session [bold]{meta.session_id}[/]")
     else:
         console.print(
-            f"[yellow]No IDE detected.[/] Enter the worktree manually:\n"
-            f"  cd {worktree_path}"
+            f"[yellow]No IDE detected.[/] Enter the worktree manually:\n  cd {worktree_path}"
         )
 
 
@@ -569,6 +588,7 @@ def status() -> None:
 
     table = Table(title="KoteGuard Sessions", show_header=True, header_style="bold cyan")
     table.add_column("Session ID", style="bold")
+    table.add_column("Plan")
     table.add_column("Project")
     table.add_column("Status")
     table.add_column("Session Age")
@@ -597,7 +617,11 @@ def status() -> None:
 
         # Session age
         if isinstance(s.created_at, datetime):
-            age_seconds = (now - s.created_at.replace(tzinfo=UTC) if s.created_at.tzinfo is None else (now - s.created_at)).total_seconds()
+            age_seconds = (
+                now - s.created_at.replace(tzinfo=UTC)
+                if s.created_at.tzinfo is None
+                else (now - s.created_at)
+            ).total_seconds()
             if age_seconds < 3600:
                 age_str = f"{int(age_seconds / 60)}m ago"
             elif age_seconds < 86400:
@@ -610,7 +634,9 @@ def status() -> None:
             age_str = "unknown"
 
         # Agent mode
-        agent_mode_str = str(s.agent_mode) if hasattr(s, "agent_mode") and s.agent_mode else "copilot-cli"
+        agent_mode_str = (
+            str(s.agent_mode) if hasattr(s, "agent_mode") and s.agent_mode else "copilot-cli"
+        )
 
         # Android CLI
         android_cli_str = "[green]✓[/]" if s.android_cli_available else "[red]✗[/]"
@@ -630,11 +656,18 @@ def status() -> None:
                     context_pressure = "High"
                 elif plan_size > 3000:
                     context_pressure = "Medium"
-        pressure_color = {"Low": "green", "Medium": "yellow", "High": "red"}.get(context_pressure, "")
-        pressure_str = f"[{pressure_color}]{context_pressure}[/]" if pressure_color else context_pressure
+        pressure_color = {"Low": "green", "Medium": "yellow", "High": "red"}.get(
+            context_pressure, ""
+        )
+        pressure_str = (
+            f"[{pressure_color}]{context_pressure}[/]" if pressure_color else context_pressure
+        )
+
+        plan_title_str = (s.plan_title[:35] + "…") if len(s.plan_title) > 35 else s.plan_title
 
         table.add_row(
             s.session_id,
+            plan_title_str or "[dim]—[/]",
             s.project_slug,
             f"[{style}]{s.status}[/]" if style else str(s.status),
             age_str,
@@ -652,9 +685,7 @@ def status() -> None:
     console.print(table)
 
     if old_sessions_found:
-        console.print(
-            "\n[yellow]Tip:[/] Sessions older than 24h may benefit from a fresh worktree"
-        )
+        console.print("\n[yellow]Tip:[/] Sessions older than 24h may benefit from a fresh worktree")
 
 
 # ---------------------------------------------------------------------------
@@ -732,6 +763,7 @@ def cleanup(
                 # Check for uncommitted changes — they would be silently lost on merge
                 try:
                     import git as _git
+
                     wt_repo = _git.Repo(worktree_path)
                     if wt_repo.is_dirty(untracked_files=False):
                         console.print(
@@ -767,6 +799,7 @@ def cleanup(
                 changed_files: list[str] = []
                 try:
                     import git as _git
+
                     repo = _git.Repo(Path(meta.project_root), search_parent_directories=True)
                     diff_output = repo.git.diff(f"HEAD...{meta.branch_name}", "--name-only")
                     changed_files = [f for f in diff_output.splitlines() if f.strip()]
@@ -795,9 +828,7 @@ def cleanup(
                     for e in plan_result.errors + changes_result.errors:
                         console.print(f"  [red]✗[/] {e}")
                     if not force:
-                        console.print(
-                            "[yellow]Use --force to accept anyway.[/]"
-                        )
+                        console.print("[yellow]Use --force to accept anyway.[/]")
                         err_console.print(f"[red]Blocked[/] session {sid} due to validation errors")
                         continue
                 else:
@@ -819,30 +850,46 @@ def cleanup(
             else:
                 err_console.print(f"[red]Failed[/] to discard session {sid}")
 
-    # --compact: accumulate session summary to WORKSPACE.md
+    # --compact: accumulate session summary to project-local WORKSPACE.md
     if compact:
         import questionary as q
+
+        # Resolve project root from the most recently processed session
+        _compact_project_root: Path | None = None
+        for sid in targets:
+            _m = load_session(sid)
+            if _m:
+                _compact_project_root = Path(_m.project_root)
+                break
+
         summary = q.text(
             "Session summary (what was accomplished, key decisions, lessons learned):"
         ).ask()
         if summary:
-            _append_workspace_summary(summary)
+            _append_workspace_summary(summary, project_root=_compact_project_root)
 
 
-def _append_workspace_summary(summary: str) -> None:
-    """Append a session summary section to ~/.kote/WORKSPACE.md."""
-    workspace_path = Path.home() / ".kote" / "WORKSPACE.md"
+def _append_workspace_summary(summary: str, project_root: Path | None = None) -> None:
+    """Append a session summary section to the project-local .kote/WORKSPACE.md.
+
+    Falls back to ~/.kote/WORKSPACE.md when no project root is known.
+    Writing to the project-local file ensures future worktrees pick up the
+    accumulated knowledge (it is copied into each worktree during kote prep).
+    """
+    if project_root is not None:
+        workspace_path = project_root / ".kote" / "WORKSPACE.md"
+    else:
+        workspace_path = Path.home() / ".kote" / "WORKSPACE.md"
+
     date_str = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
-
     section = f"\n## Session Summary ({date_str})\n\n{summary}\n"
 
     if workspace_path.exists():
         existing = workspace_path.read_text(encoding="utf-8")
         workspace_path.write_text(existing + section, encoding="utf-8")
     else:
-        workspace_path.write_text(
-            f"# KoteGuard Knowledge Base\n{section}", encoding="utf-8"
-        )
+        workspace_path.parent.mkdir(parents=True, exist_ok=True)
+        workspace_path.write_text(f"# KoteGuard Knowledge Base\n{section}", encoding="utf-8")
     console.print(f"[green]✓ Summary appended to[/] {workspace_path}")
 
 
@@ -879,6 +926,7 @@ def validate(
     for warn in result.warnings:
         console.print(f"  [yellow]⚠[/] {warn}")
 
+    ws_result = None
     if workspace_file:
         ws_result = validate_workspace_file(workspace_file)
         if ws_result.errors:
@@ -890,7 +938,7 @@ def validate(
         for warn in ws_result.warnings:
             console.print(f"  [yellow]⚠[/] {warn}")
 
-    if not result:
+    if not result or (ws_result is not None and not ws_result):
         raise typer.Exit(1) from None
 
 
@@ -917,15 +965,18 @@ def android_skills(
         typer.Option("--project", "-p", help="Project root (default: cwd)"),
     ] = None,
 ) -> None:
-    """List available Android skills and suggest relevant ones for the current project."""
+    """List available Android skills and suggest relevant ones for the current project.
+
+    Cached skills from `kote android update` take priority over bundled skills.
+    """
+    from koteguard.config import ANDROID_SKILLS_CACHE_DIR
     from koteguard.project_scanner import ProjectScanner
     from koteguard.templates import _templates_dir
 
-    table = Table(
-        title="Android Skills", show_header=True, header_style="bold cyan"
-    )
+    table = Table(title="Android Skills", show_header=True, header_style="bold cyan")
     table.add_column("Skill", style="bold")
     table.add_column("Description")
+    table.add_column("Source")
     table.add_column("Suggested")
 
     # Detect project suggestions
@@ -933,6 +984,7 @@ def android_skills(
     suggested: list[str] = []
     try:
         from koteguard.config import resolve_android_cli_enabled as _resolve_cli
+
         _android_cli_enabled = _resolve_cli(project_root)
         scanner = ProjectScanner(project_root, android_cli_enabled=_android_cli_enabled)
         info = scanner.scan()
@@ -940,48 +992,183 @@ def android_skills(
     except Exception:
         pass
 
-    # Read from templates
-    skills_dir = _templates_dir() / "android-skills"
-    skill_entries: list[tuple[str, str]] = []
-    if skills_dir.exists():
-        for skill_file in sorted(skills_dir.glob("*.skill.md")):
-            skill_name = skill_file.stem.replace(".skill", "")
-            description = ""
-            try:
-                content = skill_file.read_text(encoding="utf-8")
-                # Extract description from first paragraph after H1
-                lines = content.splitlines()
-                for i, line in enumerate(lines):
-                    if line.startswith("# ") and i + 2 < len(lines):
-                        description = lines[i + 2].strip() if lines[i + 1].strip() == "" else lines[i + 1].strip()
-                        break
-            except Exception:
-                pass
-            skill_entries.append((skill_name, description or "Android best practices skill"))
-    else:
-        # Fallback list
-        skill_entries = [
-            ("navigation3", "Navigation 3 library best practices"),
-            ("edge-to-edge", "Edge-to-edge display implementation"),
-            ("agp9", "Android Gradle Plugin 9 migration guide"),
-            ("compose-migration", "Jetpack Compose migration patterns"),
-        ]
+    def _extract_description(skill_file: Path) -> str:
+        try:
+            content = skill_file.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            for i, line in enumerate(lines):
+                if line.startswith("# ") and i + 2 < len(lines):
+                    return (
+                        lines[i + 2].strip() if lines[i + 1].strip() == "" else lines[i + 1].strip()
+                    )
+        except Exception:
+            pass
+        return "Android best practices skill"
 
-    for skill_name, description in skill_entries:
+    # Merge: cached skills (from kote android update) override bundled skills
+    skill_entries: dict[str, tuple[str, str]] = {}  # name → (description, source_label)
+
+    bundled_dir = _templates_dir() / "android-skills"
+    if bundled_dir.exists():
+        for f in sorted(bundled_dir.glob("*.skill.md")):
+            name = f.stem.replace(".skill", "")
+            skill_entries[name] = (_extract_description(f), "bundled")
+
+    if ANDROID_SKILLS_CACHE_DIR.exists():
+        for f in sorted(ANDROID_SKILLS_CACHE_DIR.glob("*.skill.md")):
+            name = f.stem.replace(".skill", "")
+            skill_entries[name] = (_extract_description(f), "github.com/android/skills")
+
+    if not skill_entries:
+        skill_entries = {
+            "navigation3": ("Navigation 3 library best practices", "bundled"),
+            "edge-to-edge": ("Edge-to-edge display implementation", "bundled"),
+            "agp9": ("Android Gradle Plugin 9 migration guide", "bundled"),
+            "compose-migration": ("Jetpack Compose migration patterns", "bundled"),
+        }
+
+    for skill_name, (description, source) in sorted(skill_entries.items()):
         is_suggested = "✓" if skill_name in suggested else ""
         suggested_style = "green" if is_suggested else ""
+        source_style = "cyan" if source != "bundled" else "dim"
         table.add_row(
             skill_name,
             description,
+            f"[{source_style}]{source}[/]",
             f"[{suggested_style}]{is_suggested}[/]" if is_suggested else "",
         )
 
     console.print(table)
 
-    if suggested:
-        console.print(f"\n[dim]Suggested for your project: {', '.join(suggested)}[/]")
+    if ANDROID_SKILLS_CACHE_DIR.exists():
+        count = len(list(ANDROID_SKILLS_CACHE_DIR.glob("*.skill.md")))
+        console.print(
+            f"\n[cyan]{count} skill(s) synced from github.com/android/skills[/] "
+            f"(run [bold]kote android update[/] to refresh)"
+        )
     else:
-        console.print("\n[dim]Run `kote prep --android-first` to enable skills for a session.[/]")
+        console.print(
+            "\n[dim]Tip: run [bold]kote android update[/] to sync the latest official "
+            "Android skill guides from github.com/android/skills[/]"
+        )
+
+    if suggested:
+        console.print(f"[dim]Suggested for your project: {', '.join(suggested)}[/]")
+    else:
+        console.print("[dim]Run `kote prep --android-first` to enable skills for a session.[/]")
+
+
+@android_app.command("update")
+def android_update(
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Re-download even if skill is already up to date"),
+    ] = False,
+    token: Annotated[
+        str | None,
+        typer.Option(
+            "--token",
+            help="GitHub personal access token (avoids rate limits). Also read from $GITHUB_TOKEN.",
+            envvar="GITHUB_TOKEN",
+        ),
+    ] = None,
+) -> None:
+    """Sync Android skill guides from github.com/android/skills into ~/.kote/android-skills/.
+
+    Skills are saved as flat <leaf-dir>.skill.md files under ANDROID_SKILLS_CACHE_DIR.
+    KoteGuard will prefer cached skills over bundled ones during kote prep.
+    """
+    import json
+    import urllib.request
+
+    from koteguard.config import ANDROID_SKILLS_CACHE_DIR
+
+    REPO_OWNER = "android"
+    REPO_NAME = "skills"
+    API_BASE = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents"
+
+    def _api_get(path: str) -> list[dict]:
+        url = f"{API_BASE}/{path}".rstrip("/")
+        headers: dict[str, str] = {"User-Agent": "KoteGuard/kote-android-update"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+
+    def _find_skills(path: str = "", depth: int = 0) -> list[tuple[str, str]]:
+        """Recursively find (leaf_dir_name, download_url) for all SKILL.md files."""
+        if depth > 5:
+            return []
+        try:
+            items = _api_get(path)
+        except Exception as exc:
+            console.print(f"  [yellow]⚠ API error at {path or '/'}:[/] {exc}")
+            return []
+        found = []
+        for item in items:
+            if item["name"].startswith("."):
+                continue
+            if item["type"] == "file" and item["name"] == "SKILL.md":
+                leaf = path.split("/")[-1] if path else "unknown"
+                found.append((leaf, item["download_url"]))
+            elif item["type"] == "dir":
+                found.extend(_find_skills(item["path"], depth + 1))
+        return found
+
+    console.print(
+        f"[bold cyan]Syncing Android skills[/] from "
+        f"[link=https://github.com/{REPO_OWNER}/{REPO_NAME}]"
+        f"github.com/{REPO_OWNER}/{REPO_NAME}[/link] …\n"
+    )
+
+    try:
+        skill_refs = _find_skills()
+    except Exception as exc:
+        err_console.print(f"[red]Failed to reach GitHub API:[/] {exc}")
+        raise typer.Exit(1) from None
+
+    if not skill_refs:
+        console.print("[yellow]No skills found in repo. Check your connection.[/]")
+        raise typer.Exit(1) from None
+
+    ANDROID_SKILLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    added = updated = unchanged = 0
+    for leaf_name, download_url in sorted(skill_refs):
+        dest = ANDROID_SKILLS_CACHE_DIR / f"{leaf_name}.skill.md"
+        try:
+            req = urllib.request.Request(
+                download_url,
+                headers={"User-Agent": "KoteGuard/kote-android-update"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                new_content = resp.read().decode("utf-8")
+        except Exception as exc:
+            console.print(f"  [yellow]⚠ Could not download {leaf_name}:[/] {exc}")
+            continue
+
+        if dest.exists() and not force:
+            existing = dest.read_text(encoding="utf-8")
+            if existing == new_content:
+                console.print(f"  [dim]—  {leaf_name}[/] (unchanged)")
+                unchanged += 1
+                continue
+            dest.write_text(new_content, encoding="utf-8")
+            console.print(f"  [cyan]↑  {leaf_name}[/] (updated)")
+            updated += 1
+        else:
+            dest.write_text(new_content, encoding="utf-8")
+            console.print(
+                f"  [green]✓  {leaf_name}[/] {'(re-downloaded)' if force and dest.exists() else '(new)'}"
+            )
+            added += 1
+
+    console.print(
+        f"\n[green]Done.[/] {added} new, {updated} updated, {unchanged} unchanged.\n"
+        f"Skills cached at: [dim]{ANDROID_SKILLS_CACHE_DIR}[/]\n"
+        f"Run [bold]kote android skills[/] to see the full list."
+    )
 
 
 @android_app.command("docs")
@@ -999,7 +1186,11 @@ def android_docs() -> None:
         ("Jetpack Compose", "https://developer.android.com/jetpack/compose", "online"),
         ("Navigation 3", "https://developer.android.com/guide/navigation", "online"),
         ("AGP Migration", "https://developer.android.com/build/migrate-to-declarative", "online"),
-        ("Edge-to-Edge", "https://developer.android.com/develop/ui/views/layout/edge-to-edge", "online"),
+        (
+            "Edge-to-Edge",
+            "https://developer.android.com/develop/ui/views/layout/edge-to-edge",
+            "online",
+        ),
     ]
 
     for name, url, status in docs:
@@ -1013,6 +1204,215 @@ def android_docs() -> None:
         console.print("\n[green]✓ Running inside a KoteGuard worktree[/]")
     else:
         console.print("\n[dim]Not inside a KoteGuard worktree[/]")
+
+
+# ---------------------------------------------------------------------------
+# init – interactive global config setup
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def init() -> None:
+    """Interactively configure KoteGuard global settings (~/.kote/config.toml)."""
+    import questionary
+
+    from koteguard.config import load_global_config, save_global_config
+    from koteguard.models import AgentMode, IDEChoice
+
+    _print_banner()
+    cfg = load_global_config()
+
+    console.print("[bold cyan]KoteGuard Init[/] – configure your global defaults\n")
+    console.print("[dim]Press Enter to keep the current value shown in brackets.[/]\n")
+
+    # Agent mode
+    mode_answer = questionary.select(
+        "Default agent mode?",
+        choices=[
+            questionary.Choice("Copilot CLI (terminal, deny-tool flags)", value="copilot-cli"),
+            questionary.Choice("Copilot Plugin (IDE chat panel)", value="copilot-plugin"),
+            questionary.Choice("None (inject instructions only)", value="none"),
+        ],
+        default=str(cfg.agent_mode),
+    ).ask()
+    if mode_answer:
+        cfg.agent_mode = AgentMode(mode_answer)
+
+    # Default IDE
+    ide_answer = questionary.select(
+        "Default IDE?",
+        choices=[
+            questionary.Choice("Auto-detect", value="auto"),
+            questionary.Choice("Android Studio", value="android"),
+            questionary.Choice("Xcode", value="ios"),
+        ],
+        default=str(cfg.default_ide),
+    ).ask()
+    if ide_answer:
+        cfg.default_ide = IDEChoice(ide_answer)
+
+    # Android CLI
+    cfg.android_cli_enabled = (
+        questionary.confirm(
+            "Enable Android CLI integration?",
+            default=cfg.android_cli_enabled,
+        ).ask()
+        or cfg.android_cli_enabled
+    )
+
+    # Worktrees dir
+    wt_dir_answer = questionary.text(
+        "Worktrees directory?",
+        default=str(cfg.worktrees_dir),
+    ).ask()
+    if wt_dir_answer and wt_dir_answer.strip():
+        cfg.worktrees_dir = Path(wt_dir_answer.strip())
+
+    save_global_config(cfg)
+    console.print(f"\n[green]✓ Config saved[/] → {Path.home() / '.kote' / 'config.toml'}")
+    console.print(f"  agent_mode      = [bold]{cfg.agent_mode}[/]")
+    console.print(f"  default_ide     = [bold]{cfg.default_ide}[/]")
+    console.print(f"  android_cli     = [bold]{cfg.android_cli_enabled}[/]")
+    console.print(f"  worktrees_dir   = [bold]{cfg.worktrees_dir}[/]")
+
+
+# ---------------------------------------------------------------------------
+# sessions prune – remove old session metadata
+# ---------------------------------------------------------------------------
+
+
+@sessions_app.command("prune")
+def sessions_prune(
+    days: Annotated[
+        int,
+        typer.Option("--days", help="Remove sessions older than N days (default: 30)"),
+    ] = 30,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview what would be removed without deleting"),
+    ] = False,
+) -> None:
+    """Remove completed/discarded session metadata older than N days."""
+    import shutil as _shutil
+
+    from koteguard.config import SESSIONS_DIR as _SD
+    from koteguard.worktree import list_sessions
+
+    now = datetime.now(tz=UTC)
+    cutoff_seconds = days * 86400
+
+    sessions = list_sessions()
+    candidates = [
+        s
+        for s in sessions
+        if str(s.status) in ("completed", "discarded")
+        and (
+            now - s.created_at.replace(tzinfo=UTC)
+            if s.created_at.tzinfo is None
+            else now - s.created_at
+        ).total_seconds()
+        > cutoff_seconds
+    ]
+
+    if not candidates:
+        console.print(f"[dim]No completed/discarded sessions older than {days} days.[/]")
+        return
+
+    for s in candidates:
+        session_dir = _SD / s.session_id
+        if dry_run:
+            console.print(
+                f"  [dim]would remove[/] {s.session_id} "
+                f"({s.plan_title[:40] or s.project_slug}, {s.status})"
+            )
+        else:
+            try:
+                _shutil.rmtree(session_dir, ignore_errors=True)
+                console.print(f"  [yellow]removed[/] {s.session_id}")
+            except Exception as exc:
+                err_console.print(f"  [red]Failed to remove {s.session_id}:[/] {exc}")
+
+    action = "Would remove" if dry_run else "Removed"
+    console.print(f"\n[green]✓ {action} {len(candidates)} session(s)[/]")
+
+
+# ---------------------------------------------------------------------------
+# ios skills
+# ---------------------------------------------------------------------------
+
+
+@ios_app.command("skills")
+def ios_skills(
+    project: Annotated[
+        Path | None,
+        typer.Option("--project", "-p", help="Project root (default: cwd)"),
+    ] = None,
+) -> None:
+    """List available iOS skill guides and suggest relevant ones for the current project."""
+    from koteguard.templates import _templates_dir
+
+    table = Table(title="iOS Skills", show_header=True, header_style="bold cyan")
+    table.add_column("Skill", style="bold")
+    table.add_column("Description")
+    table.add_column("Suggested")
+
+    # Detect project suggestions
+    project_root = project or Path.cwd()
+    suggested: list[str] = []
+    try:
+        from koteguard.config import resolve_android_cli_enabled as _resolve_cli
+        from koteguard.project_scanner import ProjectScanner
+
+        _android_cli_enabled = _resolve_cli(project_root)
+        scanner = ProjectScanner(project_root, android_cli_enabled=_android_cli_enabled)
+        info = scanner.scan()
+        suggested = info.ios_detected_skills
+    except Exception:
+        pass
+
+    # Read from templates/ios-skills/
+    skills_dir = _templates_dir() / "ios-skills"
+    skill_entries: list[tuple[str, str]] = []
+    if skills_dir.exists():
+        for skill_file in sorted(skills_dir.glob("*.skill.md")):
+            skill_name = skill_file.stem.replace(".skill", "")
+            description = ""
+            try:
+                content = skill_file.read_text(encoding="utf-8")
+                lines = content.splitlines()
+                for i, line in enumerate(lines):
+                    if line.startswith("# ") and i + 2 < len(lines):
+                        description = (
+                            lines[i + 2].strip()
+                            if lines[i + 1].strip() == ""
+                            else lines[i + 1].strip()
+                        )
+                        break
+            except Exception:
+                pass
+            skill_entries.append((skill_name, description or "iOS best practices skill"))
+    else:
+        skill_entries = [
+            ("swiftui-patterns", "SwiftUI state management and scene lifecycle"),
+            ("swift-concurrency", "async/await, actors, structured concurrency"),
+            ("xctest", "XCTest, async testing, snapshot testing"),
+        ]
+
+    for skill_name, description in skill_entries:
+        is_suggested = "✓" if skill_name in suggested else ""
+        suggested_style = "green" if is_suggested else ""
+        table.add_row(
+            skill_name,
+            description,
+            f"[{suggested_style}]{is_suggested}[/]" if is_suggested else "",
+        )
+
+    console.print(table)
+
+    if suggested:
+        console.print(f"\n[dim]Suggested for your project: {', '.join(suggested)}[/]")
+    else:
+        console.print("\n[dim]Run `kote prep` in your iOS project directory to enable skills.[/]")
 
 
 # ---------------------------------------------------------------------------

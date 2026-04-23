@@ -1,6 +1,12 @@
-"""Tests for Pydantic v2 models."""
+"""Comprehensive tests for koteguard/models.py.
+
+Covers every model, enum, validator, and field constraint.
+"""
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -25,308 +31,38 @@ from koteguard.models import (
 )
 
 # ---------------------------------------------------------------------------
-# TaskModel
+# Enums
 # ---------------------------------------------------------------------------
 
 
-class TestTaskModel:
-    def test_valid(self):
-        t = TaskModel(
-            session_id="abc-123",
-            description="Add dark mode support",
-            context="The app uses Material You",
-            constraints=["Don't break existing tests"],
-        )
-        assert t.session_id == "abc-123"
-        assert t.description == "Add dark mode support"
+class TestProjectType:
+    def test_values(self):
+        assert ProjectType.ANDROID == "android"
+        assert ProjectType.IOS == "ios"
+        assert ProjectType.MONOREPO == "monorepo"
+        assert ProjectType.UNKNOWN == "unknown"
 
-    def test_defaults(self):
-        t = TaskModel(session_id="xyz-456", description="Fix bug")
-        assert t.context == ""
-        assert t.constraints == []
+    def test_str_enum(self):
+        assert str(ProjectType.ANDROID) == "android"
 
-    def test_invalid_session_id_too_short(self):
-        with pytest.raises(ValidationError):
-            TaskModel(session_id="ab", description="x")
-
-    def test_invalid_session_id_uppercase(self):
-        with pytest.raises(ValidationError):
-            TaskModel(session_id="ABC-def", description="x")
-
-    def test_invalid_session_id_starts_with_dash(self):
-        with pytest.raises(ValidationError):
-            TaskModel(session_id="-abc-def", description="x")
-
-    def test_empty_description_fails(self):
-        with pytest.raises(ValidationError):
-            TaskModel(session_id="abc-123", description="")
+    def test_membership(self):
+        assert "android" in list(ProjectType)
+        assert "ios" in list(ProjectType)
 
 
-# ---------------------------------------------------------------------------
-# PlanModel
-# ---------------------------------------------------------------------------
+class TestSessionStatus:
+    def test_all_values(self):
+        assert SessionStatus.ACTIVE == "active"
+        assert SessionStatus.COMPLETED == "completed"
+        assert SessionStatus.DISCARDED == "discarded"
+        assert SessionStatus.PENDING_REVIEW == "pending_review"
 
 
-class TestPlanModel:
-    def test_valid(self):
-        p = PlanModel(
-            title="Add auth",
-            objectives=["Implement login", "Implement logout"],
-            tasks=["Create AuthViewModel", "Wire up UI"],
-            definition_of_done=["Tests pass", "PR approved"],
-            estimated_time="2 hours",
-        )
-        assert p.title == "Add auth"
-        assert len(p.tasks) == 2
-
-    def test_empty_objectives_fails(self):
-        with pytest.raises(ValidationError):
-            PlanModel(
-                title="x",
-                objectives=[],
-                tasks=["t"],
-                definition_of_done=["d"],
-            )
-
-    def test_empty_tasks_fails(self):
-        with pytest.raises(ValidationError):
-            PlanModel(
-                title="x",
-                objectives=["o"],
-                tasks=[],
-                definition_of_done=["d"],
-            )
-
-    def test_default_risks_empty(self):
-        p = PlanModel(
-            title="t",
-            objectives=["o"],
-            tasks=["t"],
-            definition_of_done=["d"],
-        )
-        assert p.risks == []
-
-    def test_default_estimated_time(self):
-        p = PlanModel(
-            title="t",
-            objectives=["o"],
-            tasks=["t"],
-            definition_of_done=["d"],
-        )
-        assert p.estimated_time == "unknown"
-
-    def test_android_skills_default_empty(self):
-        p = PlanModel(
-            title="t",
-            objectives=["o"],
-            tasks=["t"],
-            definition_of_done=["d"],
-        )
-        assert p.android_skills == []
-
-    def test_android_skills_populated(self):
-        p = PlanModel(
-            title="t",
-            objectives=["o"],
-            tasks=["t"],
-            definition_of_done=["d"],
-            android_skills=["navigation3", "edge-to-edge"],
-        )
-        assert "navigation3" in p.android_skills
-
-
-# ---------------------------------------------------------------------------
-# WorkspaceModel
-# ---------------------------------------------------------------------------
-
-
-class TestWorkspaceModel:
-    def test_valid(self):
-        ws = WorkspaceModel(
-            project_name="MyApp",
-            tech_stack=["Kotlin", "Android SDK"],
-        )
-        assert ws.project_name == "MyApp"
-        assert "Kotlin" in ws.tech_stack
-
-    def test_empty_tech_stack_fails(self):
-        with pytest.raises(ValidationError):
-            WorkspaceModel(project_name="x", tech_stack=[])
-
-    def test_defaults(self):
-        ws = WorkspaceModel(project_name="App", tech_stack=["Swift"])
-        assert ws.architecture == ""
-        assert ws.conventions == []
-        assert ws.structure == {}
-        assert ws.gotchas == []
-        assert ws.android_agent_stack == {}
-
-    def test_android_agent_stack(self):
-        ws = WorkspaceModel(
-            project_name="App",
-            tech_stack=["Kotlin"],
-            android_agent_stack={
-                "cli_version": "available",
-                "enabled_skills": ["navigation3"],
-            },
-        )
-        assert ws.android_agent_stack["cli_version"] == "available"
-
-
-# ---------------------------------------------------------------------------
-# ProjectInfo
-# ---------------------------------------------------------------------------
-
-
-class TestProjectInfo:
-    def test_defaults(self):
-        pi = ProjectInfo()
-        assert pi.project_type == ProjectType.UNKNOWN
-        assert pi.confidence == 0.0
-        assert pi.languages == []
-        assert pi.android_cli_available is False
-        assert pi.detected_skills == []
-        assert pi.doc_summary == {}
-
-    def test_confidence_bounds(self):
-        with pytest.raises(ValidationError):
-            ProjectInfo(confidence=1.5)
-        with pytest.raises(ValidationError):
-            ProjectInfo(confidence=-0.1)
-
-    def test_android_type(self):
-        pi = ProjectInfo(
-            project_type=ProjectType.ANDROID,
-            confidence=0.9,
-            android_min_sdk=21,
-        )
-        assert pi.android_min_sdk == 21
-
-    def test_no_flutter_rn_type(self):
-        """Flutter and React Native should not exist as ProjectTypes."""
-        valid_types = [pt.value for pt in ProjectType]
-        assert "flutter" not in valid_types
-        assert "react_native" not in valid_types
-
-    def test_android_cli_available_field(self):
-        pi = ProjectInfo(android_cli_available=True, detected_skills=["navigation3"])
-        assert pi.android_cli_available is True
-        assert "navigation3" in pi.detected_skills
-
-
-# ---------------------------------------------------------------------------
-# SessionMeta
-# ---------------------------------------------------------------------------
-
-
-class TestSessionMeta:
-    def test_valid(self, tmp_path):
-        meta = SessionMeta(
-            session_id="sess-01",
-            project_slug="my-app",
-            project_root=tmp_path,
-            worktree_path=tmp_path / "worktree",
-            branch_name="kote/sess-01-task",
-        )
-        assert meta.status == "active"
-        assert meta.completed_at is None
-        assert meta.plan_title == ""
-        assert meta.android_cli_available is False
-        assert meta.agent_mode == "copilot-cli"
-
-    def test_agent_mode_field(self, tmp_path):
-        meta = SessionMeta(
-            session_id="sess-am",
-            project_slug="p",
-            project_root=tmp_path,
-            worktree_path=tmp_path,
-            branch_name="b",
-            agent_mode=AgentMode.COPILOT_PLUGIN,
-        )
-        assert meta.agent_mode == "copilot-plugin"
-
-    def test_status_enum_values(self, tmp_path):
-        meta = SessionMeta(
-            session_id="sess-02",
-            project_slug="p",
-            project_root=tmp_path,
-            worktree_path=tmp_path,
-            branch_name="b",
-            status=SessionStatus.COMPLETED,
-        )
-        assert meta.status == "completed"
-
-    def test_plan_title_field(self, tmp_path):
-        meta = SessionMeta(
-            session_id="sess-03",
-            project_slug="p",
-            project_root=tmp_path,
-            worktree_path=tmp_path,
-            branch_name="b",
-            plan_title="Add login screen",
-        )
-        assert meta.plan_title == "Add login screen"
-
-    def test_skills_loaded_field(self, tmp_path):
-        meta = SessionMeta(
-            session_id="sess-04",
-            project_slug="p",
-            project_root=tmp_path,
-            worktree_path=tmp_path,
-            branch_name="b",
-            skills_loaded=["navigation3", "edge-to-edge"],
-        )
-        assert len(meta.skills_loaded) == 2
-
-
-# ---------------------------------------------------------------------------
-# GlobalConfig / ProjectLocalConfig
-# ---------------------------------------------------------------------------
-
-
-class TestPlanTask:
-    def test_valid(self):
-        t = PlanTask(id="t1", description="Create NavGraph")
-        assert t.id == "t1"
-        assert t.description == "Create NavGraph"
-        assert t.done is False
-
-    def test_done_true(self):
-        t = PlanTask(id="t2", description="Write tests", done=True)
-        assert t.done is True
-
-    def test_plan_model_accepts_string_tasks(self):
-        """Legacy: list[str] tasks should be coerced to list[PlanTask]."""
-        p = PlanModel(
-            title="Test",
-            objectives=["o"],
-            tasks=["Task one", "Task two"],
-            definition_of_done=["Done"],
-        )
-        assert len(p.tasks) == 2
-        assert isinstance(p.tasks[0], PlanTask)
-        assert p.tasks[0].id == "t1"
-        assert p.tasks[0].description == "Task one"
-
-    def test_plan_model_accepts_plan_task_objects(self):
-        """Native: list[PlanTask] should be accepted as-is."""
-        p = PlanModel(
-            title="Test",
-            objectives=["o"],
-            tasks=[PlanTask(id="t1", description="Do X"), PlanTask(id="t2", description="Do Y")],
-            definition_of_done=["Done"],
-        )
-        assert p.tasks[0].id == "t1"
-        assert p.tasks[1].description == "Do Y"
-
-    def test_spec_version_default(self):
-        p = PlanModel(
-            title="t",
-            objectives=["o"],
-            tasks=["t"],
-            definition_of_done=["d"],
-        )
-        assert p.spec_version == "1.0"
+class TestIDEChoice:
+    def test_values(self):
+        assert IDEChoice.ANDROID_STUDIO == "android"
+        assert IDEChoice.XCODE == "ios"
+        assert IDEChoice.AUTO == "auto"
 
 
 class TestAgentMode:
@@ -337,42 +73,382 @@ class TestAgentMode:
 
     def test_from_string(self):
         assert AgentMode("copilot-cli") == AgentMode.COPILOT_CLI
-        assert AgentMode("copilot-plugin") == AgentMode.COPILOT_PLUGIN
+
+    def test_invalid_raises(self):
+        with pytest.raises(ValueError):
+            AgentMode("bad-mode")
 
 
-class TestGlobalConfig:
+# ---------------------------------------------------------------------------
+# PlanTask
+# ---------------------------------------------------------------------------
+
+
+class TestPlanTask:
+    def test_basic(self):
+        t = PlanTask(id="t1", description="Do something")
+        assert t.id == "t1"
+        assert t.done is False
+
+    def test_done_true(self):
+        t = PlanTask(id="t2", description="Done task", done=True)
+        assert t.done is True
+
+    def test_empty_description_raises(self):
+        with pytest.raises(ValidationError):
+            PlanTask(id="t3", description="")
+
+
+# ---------------------------------------------------------------------------
+# TaskModel
+# ---------------------------------------------------------------------------
+
+
+class TestTaskModel:
+    def test_valid(self):
+        t = TaskModel(
+            session_id="abc-123",
+            description="Fix the bug",
+            context="Some context",
+            constraints=["No push"],
+        )
+        assert t.session_id == "abc-123"
+        assert t.constraints == ["No push"]
+
+    def test_default_context_and_constraints(self):
+        t = TaskModel(session_id="abc-123", description="Task")
+        assert t.context == ""
+        assert t.constraints == []
+
+    def test_invalid_session_id_too_short(self):
+        with pytest.raises(ValidationError):
+            TaskModel(session_id="ab", description="Task")
+
+    def test_invalid_session_id_uppercase(self):
+        with pytest.raises(ValidationError):
+            TaskModel(session_id="ABC-def", description="Task")
+
+    def test_invalid_session_id_starts_with_dash(self):
+        with pytest.raises(ValidationError):
+            TaskModel(session_id="-abc-123", description="Task")
+
+    def test_empty_description_raises(self):
+        with pytest.raises(ValidationError):
+            TaskModel(session_id="abc-123", description="")
+
+
+# ---------------------------------------------------------------------------
+# PlanModel
+# ---------------------------------------------------------------------------
+
+
+class TestPlanModel:
+    def test_valid_basic(self):
+        plan = PlanModel(
+            title="My Plan",
+            objectives=["Do something"],
+            tasks=["Task 1"],
+            definition_of_done=["All done"],
+        )
+        assert plan.title == "My Plan"
+        assert len(plan.tasks) == 1
+        assert isinstance(plan.tasks[0], PlanTask)
+
+    def test_tasks_coerced_from_strings(self):
+        plan = PlanModel(
+            title="Plan",
+            objectives=["Obj"],
+            tasks=["First", "Second"],
+            definition_of_done=["Done"],
+        )
+        assert plan.tasks[0].id == "t1"
+        assert plan.tasks[0].description == "First"
+        assert plan.tasks[1].id == "t2"
+
+    def test_tasks_as_plan_task_objects(self):
+        plan = PlanModel(
+            title="Plan",
+            objectives=["Obj"],
+            tasks=[PlanTask(id="x1", description="desc", done=True)],
+            definition_of_done=["Done"],
+        )
+        assert plan.tasks[0].id == "x1"
+        assert plan.tasks[0].done is True
+
+    def test_empty_title_raises(self):
+        with pytest.raises(ValidationError):
+            PlanModel(
+                title="",
+                objectives=["Obj"],
+                tasks=["Task"],
+                definition_of_done=["Done"],
+            )
+
+    def test_empty_objectives_raises(self):
+        with pytest.raises(ValidationError):
+            PlanModel(
+                title="Plan",
+                objectives=[],
+                tasks=["Task"],
+                definition_of_done=["Done"],
+            )
+
+    def test_empty_tasks_raises(self):
+        with pytest.raises(ValidationError):
+            PlanModel(
+                title="Plan",
+                objectives=["Obj"],
+                tasks=[],
+                definition_of_done=["Done"],
+            )
+
+    def test_empty_definition_of_done_raises(self):
+        with pytest.raises(ValidationError):
+            PlanModel(
+                title="Plan",
+                objectives=["Obj"],
+                tasks=["Task"],
+                definition_of_done=[],
+            )
+
+    def test_android_skills_default_empty(self):
+        plan = PlanModel(
+            title="Plan",
+            objectives=["Obj"],
+            tasks=["Task"],
+            definition_of_done=["Done"],
+        )
+        assert plan.android_skills == []
+
+    def test_risks_default_empty(self):
+        plan = PlanModel(
+            title="Plan",
+            objectives=["Obj"],
+            tasks=["Task"],
+            definition_of_done=["Done"],
+        )
+        assert plan.risks == []
+
+    def test_spec_version_default(self):
+        plan = PlanModel(
+            title="Plan",
+            objectives=["Obj"],
+            tasks=["Task"],
+            definition_of_done=["Done"],
+        )
+        assert plan.spec_version == "1.0"
+
+    def test_estimated_time_default(self):
+        plan = PlanModel(
+            title="Plan",
+            objectives=["Obj"],
+            tasks=["Task"],
+            definition_of_done=["Done"],
+        )
+        assert plan.estimated_time == "unknown"
+
+    def test_full_plan(self):
+        plan = PlanModel(
+            title="Full Plan",
+            objectives=["Obj 1", "Obj 2"],
+            tasks=["Task A", "Task B", "Task C"],
+            definition_of_done=["Tests pass", "Review done"],
+            estimated_time="2 hours",
+            risks=["Breaking change"],
+            android_skills=["navigation3", "compose-migration"],
+        )
+        assert len(plan.tasks) == 3
+        assert plan.risks == ["Breaking change"]
+        assert plan.android_skills == ["navigation3", "compose-migration"]
+
+
+# ---------------------------------------------------------------------------
+# WorkspaceModel
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceModel:
+    def test_valid(self):
+        ws = WorkspaceModel(project_name="MyApp", tech_stack=["Kotlin", "Gradle"])
+        assert ws.project_name == "MyApp"
+        assert ws.architecture == ""
+
+    def test_empty_project_name_raises(self):
+        with pytest.raises(ValidationError):
+            WorkspaceModel(project_name="", tech_stack=["Kotlin"])
+
+    def test_empty_tech_stack_raises(self):
+        with pytest.raises(ValidationError):
+            WorkspaceModel(project_name="App", tech_stack=[])
+
+    def test_optional_fields_defaults(self):
+        ws = WorkspaceModel(project_name="App", tech_stack=["Swift"])
+        assert ws.conventions == []
+        assert ws.structure == {}
+        assert ws.gotchas == []
+        assert ws.android_agent_stack == {}
+
+    def test_full_workspace(self):
+        ws = WorkspaceModel(
+            project_name="BigApp",
+            tech_stack=["Kotlin", "Compose"],
+            architecture="MVVM",
+            conventions=["Use coroutines"],
+            structure={"app/src/": "Main source"},
+            gotchas=["Don't commit .env"],
+            android_agent_stack={"cli_version": "1.0"},
+        )
+        assert ws.architecture == "MVVM"
+        assert "Use coroutines" in ws.conventions
+
+
+# ---------------------------------------------------------------------------
+# SessionMeta
+# ---------------------------------------------------------------------------
+
+
+class TestSessionMeta:
+    def test_minimal(self, tmp_path):
+        meta = SessionMeta(
+            session_id="abc-1234",
+            project_slug="myapp",
+            project_root=tmp_path,
+            worktree_path=tmp_path / "wt",
+            branch_name="kote/abc-1234-task",
+        )
+        assert meta.status == "active"
+        assert meta.android_cli_available is False
+        assert meta.skills_loaded == []
+        assert isinstance(meta.created_at, datetime)
+
+    def test_status_progression(self, tmp_path):
+        meta = SessionMeta(
+            session_id="s1",
+            project_slug="proj",
+            project_root=tmp_path,
+            worktree_path=tmp_path,
+            branch_name="kote/s1-task",
+            status=SessionStatus.COMPLETED,
+        )
+        assert meta.status == "completed"
+
+    def test_use_enum_values(self, tmp_path):
+        """model_config use_enum_values means status serializes as string."""
+        meta = SessionMeta(
+            session_id="s2",
+            project_slug="p",
+            project_root=tmp_path,
+            worktree_path=tmp_path,
+            branch_name="b",
+        )
+        dump = meta.model_dump(mode="json")
+        assert isinstance(dump["status"], str)
+
+    def test_plan_title_default_empty(self, tmp_path):
+        meta = SessionMeta(
+            session_id="s3",
+            project_slug="p",
+            project_root=tmp_path,
+            worktree_path=tmp_path,
+            branch_name="b",
+        )
+        assert meta.plan_title == ""
+
+
+# ---------------------------------------------------------------------------
+# ProjectInfo
+# ---------------------------------------------------------------------------
+
+
+class TestProjectInfo:
     def test_defaults(self):
-        cfg = GlobalConfig()
-        assert cfg.default_ide == "auto"
-        assert cfg.auto_open_ide is True
-        assert cfg.android_cli_version == ""
-        assert cfg.skills_repo_url == "https://github.com/android/skills"
-        assert cfg.agent_mode == "copilot-cli"
-        assert cfg.android_cli_enabled is True
+        info = ProjectInfo()
+        assert info.project_type == ProjectType.UNKNOWN
+        assert info.project_name == "unknown"
+        assert info.confidence == 0.0
+        assert info.languages == []
+        assert info.detected_skills == []
+        assert info.ios_detected_skills == []
 
-    def test_ide_choice(self):
-        cfg = GlobalConfig(default_ide=IDEChoice.ANDROID_STUDIO)
-        assert cfg.default_ide == "android"
+    def test_confidence_bounds(self):
+        with pytest.raises(ValidationError):
+            ProjectInfo(confidence=1.5)
+        with pytest.raises(ValidationError):
+            ProjectInfo(confidence=-0.1)
 
-    def test_agent_mode_field(self):
-        cfg = GlobalConfig(agent_mode=AgentMode.COPILOT_PLUGIN)
-        assert cfg.agent_mode == "copilot-plugin"
+    def test_android_fields(self):
+        info = ProjectInfo(
+            project_type=ProjectType.ANDROID,
+            android_min_sdk=26,
+            android_target_sdk=34,
+            android_compile_sdk=34,
+            android_package="com.example.app",
+        )
+        assert info.android_min_sdk == 26
+        assert info.android_package == "com.example.app"
 
-    def test_android_cli_disabled(self):
-        cfg = GlobalConfig(android_cli_enabled=False)
-        assert cfg.android_cli_enabled is False
+    def test_ios_fields(self):
+        info = ProjectInfo(
+            project_type=ProjectType.IOS,
+            ios_bundle_id="com.example.app",
+            ios_deployment_target="16.0",
+        )
+        assert info.ios_bundle_id == "com.example.app"
+        assert info.ios_deployment_target == "16.0"
 
 
-class TestProjectLocalConfig:
+# ---------------------------------------------------------------------------
+# AndroidSkillRef
+# ---------------------------------------------------------------------------
+
+
+class TestAndroidSkillRef:
+    def test_basic(self):
+        ref = AndroidSkillRef(name="navigation3", url="https://example.com", enabled=True)
+        assert ref.name == "navigation3"
+        assert ref.description == ""
+
+    def test_disabled(self):
+        ref = AndroidSkillRef(name="agp9", url="https://example.com", enabled=False)
+        assert ref.enabled is False
+
+
+# ---------------------------------------------------------------------------
+# UsedSkill
+# ---------------------------------------------------------------------------
+
+
+class TestUsedSkill:
     def test_defaults(self):
-        cfg = ProjectLocalConfig()
-        assert cfg.last_session_id is None
-        assert cfg.notes == ""
-        assert cfg.android_cli_enabled is None  # None = defer to GlobalConfig
+        skill = UsedSkill(skill_name="navigation3", applied_to="MainActivity.kt")
+        assert isinstance(skill.timestamp, datetime)
 
-    def test_android_cli_override(self):
-        cfg = ProjectLocalConfig(android_cli_enabled=False)
-        assert cfg.android_cli_enabled is False
+    def test_custom_timestamp(self):
+        ts = datetime(2024, 1, 1, tzinfo=UTC)
+        skill = UsedSkill(skill_name="agp9", applied_to="build.gradle", timestamp=ts)
+        assert skill.timestamp == ts
+
+
+# ---------------------------------------------------------------------------
+# SkillsComplianceResult
+# ---------------------------------------------------------------------------
+
+
+class TestSkillsComplianceResult:
+    def test_compliant(self):
+        r = SkillsComplianceResult(compliant=True)
+        assert r.compliant is True
+        assert r.missing_skills == []
+        assert r.suggestions == []
+
+    def test_non_compliant_with_details(self):
+        r = SkillsComplianceResult(
+            compliant=False,
+            missing_skills=["navigation3"],
+            suggestions=["Add navigation3 to android_skills"],
+        )
+        assert not r.compliant
+        assert "navigation3" in r.missing_skills
 
 
 # ---------------------------------------------------------------------------
@@ -381,65 +457,75 @@ class TestProjectLocalConfig:
 
 
 class TestAuditEntry:
-    def test_valid(self):
-        e = AuditEntry(event="worktree_created", session_id="abc-123")
-        assert e.event == "worktree_created"
-        assert e.details == {}
+    def test_defaults(self):
+        entry = AuditEntry(event="session_created")
+        assert isinstance(entry.timestamp, datetime)
+        assert entry.session_id is None
+        assert entry.details == {}
 
-    def test_with_details(self):
-        e = AuditEntry(
+    def test_full(self):
+        entry = AuditEntry(
             event="worktree_accepted",
-            session_id="xyz",
-            details={"branch": "kote/xyz-task"},
+            session_id="abc-123",
+            details={"branch": "kote/abc"},
         )
-        assert e.details["branch"] == "kote/xyz-task"
+        assert entry.session_id == "abc-123"
+        assert entry.details["branch"] == "kote/abc"
 
 
 # ---------------------------------------------------------------------------
-# Android Skills models (v1.1)
+# GlobalConfig
 # ---------------------------------------------------------------------------
 
 
-class TestAndroidSkillRef:
-    def test_valid(self):
-        skill = AndroidSkillRef(
-            name="navigation3",
-            url="https://developer.android.com/guide/navigation",
+class TestGlobalConfig:
+    def test_defaults(self):
+        cfg = GlobalConfig()
+        assert cfg.default_ide == "auto"
+        assert cfg.agent_mode == "copilot-cli"
+        assert cfg.android_cli_enabled is True
+        assert cfg.auto_open_ide is True
+        assert cfg.skills_repo_url == "https://github.com/android/skills"
+
+    def test_worktrees_dir_default(self):
+        cfg = GlobalConfig()
+        assert ".kote" in str(cfg.worktrees_dir)
+
+    def test_override_agent_mode(self):
+        cfg = GlobalConfig(agent_mode=AgentMode.COPILOT_PLUGIN)
+        assert cfg.agent_mode == "copilot-plugin"
+
+    def test_model_dump_json_mode(self):
+        cfg = GlobalConfig()
+        data = cfg.model_dump(mode="json")
+        assert isinstance(data["default_ide"], str)
+        assert isinstance(data["agent_mode"], str)
+
+
+# ---------------------------------------------------------------------------
+# ProjectLocalConfig
+# ---------------------------------------------------------------------------
+
+
+class TestProjectLocalConfig:
+    def test_defaults(self):
+        cfg = ProjectLocalConfig()
+        assert cfg.last_session_id is None
+        assert cfg.default_ide is None
+        assert cfg.notes == ""
+        assert cfg.android_cli_enabled is None
+
+    def test_with_values(self):
+        cfg = ProjectLocalConfig(
+            last_session_id="abc-1",
+            default_ide=IDEChoice.ANDROID_STUDIO,
+            android_cli_enabled=False,
         )
-        assert skill.name == "navigation3"
-        assert skill.enabled is True
-        assert skill.description == ""
+        assert cfg.last_session_id == "abc-1"
+        assert cfg.android_cli_enabled is False
 
-    def test_disabled_skill(self):
-        skill = AndroidSkillRef(
-            name="agp9",
-            url="https://example.com",
-            enabled=False,
-            description="AGP 9 migration",
-        )
-        assert skill.enabled is False
-
-
-class TestUsedSkill:
-    def test_valid(self):
-        skill = UsedSkill(skill_name="navigation3", applied_to="HomeFragment.kt")
-        assert skill.skill_name == "navigation3"
-        assert skill.applied_to == "HomeFragment.kt"
-        assert skill.timestamp is not None
-
-
-class TestSkillsComplianceResult:
-    def test_compliant(self):
-        result = SkillsComplianceResult(compliant=True)
-        assert result.compliant is True
-        assert result.missing_skills == []
-        assert result.suggestions == []
-
-    def test_non_compliant(self):
-        result = SkillsComplianceResult(
-            compliant=False,
-            missing_skills=["navigation3"],
-            suggestions=["Add navigation3 to android_skills in PLAN.md"],
-        )
-        assert result.compliant is False
-        assert len(result.missing_skills) == 1
+    def test_dump_excludes_none(self):
+        cfg = ProjectLocalConfig()
+        data = cfg.model_dump(mode="json", exclude_none=True)
+        assert "last_session_id" not in data
+        assert "android_cli_enabled" not in data

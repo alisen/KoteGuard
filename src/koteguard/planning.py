@@ -36,13 +36,12 @@ def render_plan(plan: PlanModel) -> str:
     """Render a PlanModel to a PLAN.md string with YAML front-matter spec block."""
     # Serialize model to plain dict for YAML (PlanTask objects become dicts)
     data = plan.model_dump(mode="json")
-    front_matter = yaml.dump(
-        data, default_flow_style=False, sort_keys=False, allow_unicode=True
-    )
+    front_matter = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
     # Human-readable markdown body
-    tasks_md_lines = [f"{i}. [{('x' if t.done else ' ')}] {t.description}"
-                      for i, t in enumerate(plan.tasks, 1)]
+    tasks_md_lines = [
+        f"{i}. [{('x' if t.done else ' ')}] {t.description}" for i, t in enumerate(plan.tasks, 1)
+    ]
     tasks_md = "\n".join(tasks_md_lines)
 
     body_lines: list[str] = [
@@ -141,8 +140,7 @@ def _parse_plan_regex(markdown: str) -> PlanModel:
         title=_extract_h1(markdown),
         objectives=_extract_section_list(markdown, "Objectives") or ["(none)"],
         tasks=raw_tasks,
-        definition_of_done=_extract_section_list(markdown, "Definition of Done")
-        or ["(none)"],
+        definition_of_done=_extract_section_list(markdown, "Definition of Done") or ["(none)"],
         estimated_time=_extract_section_text(markdown, "Estimated Time") or "unknown",
         risks=_extract_section_list(markdown, "Risks"),
         android_skills=_extract_section_list(markdown, "Android Skills"),
@@ -157,9 +155,7 @@ def _parse_plan_regex(markdown: str) -> PlanModel:
 def render_task(task: TaskModel) -> str:
     """Serialize a TaskModel to a TASK.md string with YAML front-matter."""
     data = task.model_dump(mode="json")
-    front_matter = yaml.dump(
-        data, default_flow_style=False, sort_keys=False, allow_unicode=True
-    )
+    front_matter = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
     constraints_md = "\n".join(f"- {c}" for c in task.constraints) or "- (none)"
 
@@ -170,7 +166,7 @@ def render_task(task: TaskModel) -> str:
 
 ## Context
 
-{task.context or '(none)'}
+{task.context or "(none)"}
 
 ## Constraints
 
@@ -271,9 +267,7 @@ def workspace_from_project_info(info: ProjectInfo) -> WorkspaceModel:
             "Standard Android project structure with app module."
         )
         if info.android_package:
-            structure["app/src/main/"] = (
-                f"Main source code (package: {info.android_package})"
-            )
+            structure["app/src/main/"] = f"Main source code (package: {info.android_package})"
         gotchas.append("Never commit keystore files or google-services.json")
         gotchas.append("local.properties contains machine-specific SDK paths")
         conventions = ["Follow Android Kotlin style guide", "Prefer coroutines for async"]
@@ -303,10 +297,7 @@ def workspace_from_project_info(info: ProjectInfo) -> WorkspaceModel:
                 architecture += f" Detected architecture patterns: {', '.join(unique_kw[:5])}."
 
     elif pt == "ios":
-        architecture = (
-            "iOS application. "
-            "Standard Xcode project structure."
-        )
+        architecture = "iOS application. Standard Xcode project structure."
         if info.ios_bundle_id:
             structure["*.xcodeproj"] = f"Xcode project (bundle: {info.ios_bundle_id})"
         gotchas.append("Never commit .p12 certificates or .mobileprovision files")
@@ -355,13 +346,13 @@ def render_copilot_instructions(
         android_section = f"""
 ## Android Agent Stack
 
-- **CLI Available:** {stack.get('cli_version', 'unknown')}
-- **Knowledge Base:** {stack.get('kb_status', 'unknown')}
+- **CLI Available:** {stack.get("cli_version", "unknown")}
+- **Knowledge Base:** {stack.get("kb_status", "unknown")}
 
 ### Best Practices
 
 - Always use `android` CLI commands for emulator and device management within the worktree
-- Reference enabled skills when implementing features: {', '.join(skills) if skills else 'none detected'}
+- Reference enabled skills when implementing features: {", ".join(skills) if skills else "none detected"}
 - Prefer Jetpack Compose patterns where applicable
 - Use Android-specific coroutine dispatchers (Dispatchers.IO for I/O, Dispatchers.Main for UI)
 """
@@ -374,7 +365,7 @@ def render_copilot_instructions(
 
 ## Project: {workspace.project_name}
 
-**Tech Stack:** {', '.join(workspace.tech_stack)}
+**Tech Stack:** {", ".join(workspace.tech_stack)}
 
 ## Your Mission: {plan.title}
 

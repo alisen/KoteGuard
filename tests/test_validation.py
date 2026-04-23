@@ -198,10 +198,10 @@ class TestValidateChangesAgainstPlan:
     def test_all_tasks_undone_with_changes_warns(self, tmp_path):
         """If agent changed files but no tasks marked done → warning."""
         plan_file = _write(tmp_path / "PLAN.md", _valid_plan_md())
-        result = validate_changes_against_plan(
-            tmp_path, plan_file, ["src/main/Theme.kt"]
-        )
-        done_warnings = [w for w in result.warnings if "done" in w.lower() and "marked" in w.lower()]
+        result = validate_changes_against_plan(tmp_path, plan_file, ["src/main/Theme.kt"])
+        done_warnings = [
+            w for w in result.warnings if "done" in w.lower() and "marked" in w.lower()
+        ]
         assert len(done_warnings) > 0
 
 

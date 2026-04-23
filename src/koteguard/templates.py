@@ -17,9 +17,7 @@ def _templates_dir() -> Path:
     if _REPO_TEMPLATES.exists():
         return _REPO_TEMPLATES
     raise FileNotFoundError(
-        f"Templates directory not found. Checked:\n"
-        f"  {_INSTALLED_TEMPLATES}\n"
-        f"  {_REPO_TEMPLATES}"
+        f"Templates directory not found. Checked:\n  {_INSTALLED_TEMPLATES}\n  {_REPO_TEMPLATES}"
     )
 
 

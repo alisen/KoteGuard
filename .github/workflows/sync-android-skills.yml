@@ -1,0 +1,79 @@
+name: Sync Android Skills
+
+# Runs every night at 02:00 UTC and checks whether google's android/skills repo
+# has new or updated SKILL.md files.  If anything changed, opens a PR against
+# main so the update can be reviewed before it ships to users.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # nightly at 02:00 UTC
+  workflow_dispatch:        # allow manual trigger from the Actions tab
+
+jobs:
+  sync:
+    name: Fetch & diff android/skills
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push the update branch
+      pull-requests: write  # open the PR
+
+    steps:
+      - name: Checkout KoteGuard
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Sync skills from github.com/android/skills
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python .github/scripts/sync_android_skills.py
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git diff --quiet templates/android-skills/ || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit changes
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/sync-android-skills-$(date +%Y%m%d)
+          git add templates/android-skills/
+          git commit -m "chore: sync Android skill guides from github.com/android/skills"
+
+      - name: Push branch
+        if: steps.diff.outputs.changed == 'true'
+        run: git push origin HEAD --force
+
+      - name: Open PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          gh pr create \
+            --title "chore: sync Android skill guides ($DATE)" \
+            --body "$(cat <<'EOF'
+          ## Nightly Android Skills Sync
+
+          This PR was opened automatically by the **Sync Android Skills** workflow.
+          It updates the bundled skill guides in `templates/android-skills/` to match
+          the latest content from [github.com/android/skills](https://github.com/android/skills).
+
+          ### What changed
+          See the file diff for details.
+
+          ### How to review
+          - Check that existing skill content looks correct
+          - New skill files are additions from Google's official repo
+          - Merge when ready — the next KoteGuard release will bundle the updated guides
+
+          > Workflow: `.github/workflows/sync-android-skills.yml`
+          EOF
+          )" \
+            --base main \
+            --label "dependencies" || true

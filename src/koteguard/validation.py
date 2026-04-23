@@ -197,9 +197,7 @@ def validate_changes_against_plan(
     for pattern, label in suspicious_patterns:
         matching = [f for f in changed_files if re.search(pattern, f)]
         if matching:
-            result.add_warning(
-                f"Unexpected {label} – verify these are intentional: {matching}"
-            )
+            result.add_warning(f"Unexpected {label} – verify these are intentional: {matching}")
 
     return result
 
@@ -320,9 +318,7 @@ def render_validation_report(
 
     # Used Android CLI Commands (from session audit)
     audit_entries = read_session_audit(session_id)
-    android_cmds = [
-        e for e in audit_entries if e.get("event") == "android_command"
-    ]
+    android_cmds = [e for e in audit_entries if e.get("event") == "android_command"]
     if android_cmds:
         lines.append("## Used Android CLI Commands")
         lines.append("")
@@ -363,12 +359,16 @@ def render_validation_report(
             context_files.append(fname)
 
     lines.append(f"- **Session Age:** {session_age_str}")
-    lines.append(f"- **Context Files Injected:** {', '.join(context_files) if context_files else 'none detected'}")
+    lines.append(
+        f"- **Context Files Injected:** {', '.join(context_files) if context_files else 'none detected'}"
+    )
     lines.append(f"- **Estimated Context Pressure:** {context_pressure}")
 
     recommendation = "Session looks healthy."
     if context_pressure == "High":
-        recommendation = "Run `/compact` and summarize key decisions to WORKSPACE.md before next session."
+        recommendation = (
+            "Run `/compact` and summarize key decisions to WORKSPACE.md before next session."
+        )
     elif context_pressure == "Medium":
         recommendation = "Consider wrapping up soon to keep context fresh."
 
@@ -395,9 +395,7 @@ def write_used_skills_json(session_id: str, skills: list[str]) -> Path:
     output_dir = SESSIONS_DIR / session_id / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     skills_path = output_dir / "used-skills.json"
-    skills_path.write_text(
-        json.dumps({"used_skills": skills}, indent=2), encoding="utf-8"
-    )
+    skills_path.write_text(json.dumps({"used_skills": skills}, indent=2), encoding="utf-8")
     return skills_path
 
 

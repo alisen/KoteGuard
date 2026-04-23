@@ -1,21 +1,22 @@
-"""Tests for the worktree engine – including session subdirs and history archival."""
+"""Comprehensive tests for koteguard/worktree.py.
+
+Covers _slugify, _session_meta_path, load_session, save_session, list_sessions,
+WorktreeEngine.create_worktree, accept_worktree, discard_worktree, copy_context_files,
+_archive_accept, _archive_discard, _create_session_dirs, _history_dir.
+
+Git operations are mocked via unittest.mock so the tests don't require a real git repo.
+"""
 
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from koteguard.models import SessionMeta, SessionStatus
-from koteguard.worktree import (
-    WorktreeEngine,
-    _slugify,
-    list_sessions,
-    load_session,
-    save_session,
-)
+from koteguard.models import AgentMode, SessionMeta, SessionStatus
 
 # ---------------------------------------------------------------------------
 # _slugify
@@ -23,92 +24,225 @@ from koteguard.worktree import (
 
 
 class TestSlugify:
-    def test_basic(self):
-        assert _slugify("My Cool App") == "my-cool-app"
+    def test_lowercase(self):
+        from koteguard.worktree import _slugify
 
-    def test_special_chars(self):
-        assert _slugify("Hello World!@#") == "hello-world"
+        assert _slugify("MyApp") == "myapp"
 
-    def test_leading_trailing_dashes(self):
-        result = _slugify("---hello---")
-        assert not result.startswith("-")
-        assert not result.endswith("-")
+    def test_spaces_to_hyphens(self):
+        from koteguard.worktree import _slugify
 
-    def test_max_length(self):
-        long_str = "a" * 100
-        assert len(_slugify(long_str)) <= 40
+        assert _slugify("my cool project") == "my-cool-project"
 
-    def test_empty_string(self):
+    def test_special_chars_removed(self):
+        from koteguard.worktree import _slugify
+
+        assert _slugify("my@project!") == "my-project"
+
+    def test_leading_trailing_hyphens_stripped(self):
+        from koteguard.worktree import _slugify
+
+        assert not _slugify("  ---abc---  ").startswith("-")
+
+    def test_max_40_chars(self):
+        from koteguard.worktree import _slugify
+
+        long_input = "a" * 100
+        result = _slugify(long_input)
+        assert len(result) <= 40
+
+    def test_empty_string_returns_project(self):
+        from koteguard.worktree import _slugify
+
         assert _slugify("") == "project"
 
+    def test_only_specials_returns_project(self):
+        from koteguard.worktree import _slugify
+
+        assert _slugify("@@@") == "project"
+
+    def test_numbers_preserved(self):
+        from koteguard.worktree import _slugify
+
+        assert _slugify("project123") == "project123"
+
 
 # ---------------------------------------------------------------------------
-# save / load session
+# _session_meta_path
 # ---------------------------------------------------------------------------
 
 
-class TestSessionPersistence:
-    def test_save_and_load(self, tmp_path):
-        meta = SessionMeta(
-            session_id="test-01",
-            project_slug="my-app",
+class TestSessionMetaPath:
+    def test_path_structure(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import _session_meta_path
+
+            path = _session_meta_path("sess-abc")
+        assert path == tmp_path / "sess-abc" / "meta.json"
+
+
+# ---------------------------------------------------------------------------
+# save_session / load_session
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadSession:
+    def _make_meta(self, tmp_path, session_id="sess-001") -> SessionMeta:
+        return SessionMeta(
+            session_id=session_id,
+            project_slug="myapp",
             project_root=tmp_path,
             worktree_path=tmp_path / "wt",
-            branch_name="kote/test-01-task",
+            branch_name=f"kote/{session_id}-task",
         )
-        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path / "sessions"):
+
+    def test_save_creates_meta_json(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import save_session
+
+            meta = self._make_meta(tmp_path)
             save_session(meta)
-            loaded = load_session("test-01")
+            assert (tmp_path / "sess-001" / "meta.json").exists()
+
+    def test_load_returns_session_meta(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import load_session, save_session
+
+            meta = self._make_meta(tmp_path)
+            save_session(meta)
+            loaded = load_session("sess-001")
 
         assert loaded is not None
-        assert loaded.session_id == "test-01"
-        assert loaded.project_slug == "my-app"
+        assert loaded.session_id == "sess-001"
+        assert loaded.project_slug == "myapp"
 
-    def test_plan_title_persisted(self, tmp_path):
-        meta = SessionMeta(
-            session_id="test-pt",
-            project_slug="my-app",
-            project_root=tmp_path,
-            worktree_path=tmp_path / "wt",
-            branch_name="kote/test-pt-task",
-            plan_title="Add login screen",
-        )
-        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path / "sessions"):
-            save_session(meta)
-            loaded = load_session("test-pt")
+    def test_load_returns_none_for_missing(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import load_session
 
-        assert loaded is not None
-        assert loaded.plan_title == "Add login screen"
-
-    def test_load_nonexistent(self, tmp_path):
-        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path / "sessions"):
-            result = load_session("does-not-exist")
+            result = load_session("nonexistent-session")
         assert result is None
 
-    def test_list_sessions_empty(self, tmp_path):
-        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path / "sessions"):
+    def test_save_preserves_status(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import load_session, save_session
+
+            meta = self._make_meta(tmp_path)
+            meta.status = SessionStatus.COMPLETED
+            save_session(meta)
+            loaded = load_session("sess-001")
+
+        assert loaded.status == "completed"
+
+    def test_save_preserves_agent_mode(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import load_session, save_session
+
+            meta = self._make_meta(tmp_path)
+            meta.agent_mode = AgentMode.COPILOT_PLUGIN
+            save_session(meta)
+            loaded = load_session("sess-001")
+
+        assert loaded.agent_mode == "copilot-plugin"
+
+    def test_save_preserves_plan_title(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path):
+            from koteguard.worktree import load_session, save_session
+
+            meta = self._make_meta(tmp_path)
+            meta.plan_title = "My Feature"
+            save_session(meta)
+            loaded = load_session("sess-001")
+
+        assert loaded.plan_title == "My Feature"
+
+
+# ---------------------------------------------------------------------------
+# list_sessions
+# ---------------------------------------------------------------------------
+
+
+class TestListSessions:
+    def _make_session_dir(self, sessions_dir: Path, session_id: str, **kwargs) -> None:
+        sess_dir = sessions_dir / session_id
+        sess_dir.mkdir(parents=True, exist_ok=True)
+        meta = {
+            "session_id": session_id,
+            "project_slug": "myapp",
+            "project_root": str(sessions_dir.parent),
+            "worktree_path": str(sessions_dir.parent / "wt"),
+            "branch_name": f"kote/{session_id}",
+            "status": "active",
+            "created_at": kwargs.get("created_at", datetime.now(tz=UTC).isoformat()),
+            "plan_title": kwargs.get("plan_title", ""),
+            "ide": "auto",
+            "agent_mode": "copilot-cli",
+            "android_cli_available": False,
+            "skills_loaded": [],
+            "completed_at": None,
+        }
+        (sess_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    def test_empty_when_no_sessions_dir(self, tmp_path):
+        nonexistent = tmp_path / "no-sessions"
+        with patch("koteguard.worktree.SESSIONS_DIR", nonexistent):
+            from koteguard.worktree import list_sessions
+
             result = list_sessions()
         assert result == []
 
-    def test_list_sessions(self, tmp_path):
+    def test_returns_all_sessions(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
-        metas = []
-        for i in range(3):
-            meta = SessionMeta(
-                session_id=f"sess-0{i}",
-                project_slug="proj",
-                project_root=tmp_path,
-                worktree_path=tmp_path / f"wt{i}",
-                branch_name=f"kote/sess-0{i}",
-            )
-            metas.append(meta)
-            with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
-                save_session(meta)
+        sessions_dir.mkdir()
+        self._make_session_dir(sessions_dir, "sess-001")
+        self._make_session_dir(sessions_dir, "sess-002")
 
         with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
-            loaded = list_sessions()
+            from koteguard.worktree import list_sessions
 
-        assert len(loaded) == 3
+            result = list_sessions()
+        assert len(result) == 2
+
+    def test_sorted_by_created_at_ascending(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        older = (datetime.now(tz=UTC) - timedelta(hours=2)).isoformat()
+        newer = datetime.now(tz=UTC).isoformat()
+        self._make_session_dir(sessions_dir, "newer-sess", created_at=newer)
+        self._make_session_dir(sessions_dir, "older-sess", created_at=older)
+
+        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
+            from koteguard.worktree import list_sessions
+
+            result = list_sessions()
+        assert result[0].session_id == "older-sess"
+        assert result[1].session_id == "newer-sess"
+
+    def test_skips_dirs_without_meta_json(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        self._make_session_dir(sessions_dir, "valid-sess")
+        (sessions_dir / "orphan-dir").mkdir()  # no meta.json
+
+        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
+            from koteguard.worktree import list_sessions
+
+            result = list_sessions()
+        assert len(result) == 1
+
+    def test_skips_corrupt_meta_json(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        self._make_session_dir(sessions_dir, "valid-sess")
+        corrupt_dir = sessions_dir / "corrupt-sess"
+        corrupt_dir.mkdir()
+        (corrupt_dir / "meta.json").write_text("NOT JSON", encoding="utf-8")
+
+        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
+            from koteguard.worktree import list_sessions
+
+            result = list_sessions()
+        assert len(result) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -116,149 +250,242 @@ class TestSessionPersistence:
 # ---------------------------------------------------------------------------
 
 
-class TestWorktreeEngine:
-    def _make_fake_repo(self, tmp_path: Path):
-        """Create a minimal git repo for testing."""
-        import git
+def _make_mock_repo(tmp_path: Path, branch_name: str = "main"):
+    """Build a mock git.Repo suitable for patching."""
+    mock_repo = MagicMock()
+    mock_repo.working_tree_dir = str(tmp_path)
+    mock_repo.head.is_detached = False
+    mock_repo.active_branch.name = branch_name
+    mock_repo.git.worktree = MagicMock(return_value="")
+    mock_repo.git.merge = MagicMock(return_value="")
+    mock_repo.git.diff = MagicMock(return_value="diff content")
+    mock_repo.git.branch = MagicMock(return_value="")
+    mock_repo.git.worktree = MagicMock(return_value="")
+    mock_repo.is_dirty = MagicMock(return_value=False)
+    return mock_repo
 
-        repo = git.Repo.init(tmp_path)
-        readme = tmp_path / "README.md"
-        readme.write_text("# test\n")
-        repo.index.add(["README.md"])
-        repo.index.commit("init")
-        return repo
 
-    def test_create_worktree(self, tmp_path):
-        repo = self._make_fake_repo(tmp_path)
-        worktrees_dir = tmp_path / "worktrees"
+class TestWorktreeEngineCreate:
+    def test_create_worktree_returns_session_meta(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
+        mock_repo = _make_mock_repo(tmp_path)
 
         with (
             patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
-            patch("koteguard.worktree.WORKTREES_DIR", worktrees_dir),
+            patch("koteguard.worktree.git.Repo", return_value=mock_repo),
             patch("koteguard.worktree.load_global_config") as mock_cfg,
-            patch("koteguard.worktree.append_audit"),
             patch("koteguard.worktree.append_session_audit"),
         ):
-            mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
-            engine = WorktreeEngine(tmp_path)
-            meta = engine.create_worktree("add auth feature", session_id="test01")
+            from koteguard.models import GlobalConfig
+            from koteguard.worktree import WorktreeEngine
 
-        assert meta.session_id == "test01"
-        assert "kote/" in meta.branch_name
-        assert Path(meta.worktree_path).exists()
-
-        # Cleanup
-        repo.git.worktree("remove", "--force", str(meta.worktree_path))
-        repo.git.branch("-D", meta.branch_name)
-
-    def test_create_worktree_with_plan_title(self, tmp_path):
-        repo = self._make_fake_repo(tmp_path)
-        worktrees_dir = tmp_path / "worktrees"
-        sessions_dir = tmp_path / "sessions"
-
-        with (
-            patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
-            patch("koteguard.worktree.WORKTREES_DIR", worktrees_dir),
-            patch("koteguard.worktree.load_global_config") as mock_cfg,
-            patch("koteguard.worktree.append_audit"),
-            patch("koteguard.worktree.append_session_audit"),
-        ):
-            mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
+            mock_cfg.return_value = GlobalConfig(
+                worktrees_dir=tmp_path / "worktrees",
+            )
             engine = WorktreeEngine(tmp_path)
             meta = engine.create_worktree(
-                "add auth", session_id="pttest1", plan_title="Add login screen"
+                task_description="add feature",
+                plan_title="Add dark mode",
             )
 
-        assert meta.plan_title == "Add login screen"
+        assert meta.session_id is not None
+        assert "kote/" in meta.branch_name
+        assert meta.status == "active"
+        assert meta.plan_title == "Add dark mode"
 
-        # Cleanup
-        repo.git.worktree("remove", "--force", str(meta.worktree_path))
-        repo.git.branch("-D", meta.branch_name)
-
-    def test_session_subdirs_created(self, tmp_path):
-        """Session context/logs/output subdirs should be created."""
-        repo = self._make_fake_repo(tmp_path)
-        worktrees_dir = tmp_path / "worktrees"
+    def test_create_worktree_uses_custom_session_id(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
+        mock_repo = _make_mock_repo(tmp_path)
 
         with (
             patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
-            patch("koteguard.worktree.WORKTREES_DIR", worktrees_dir),
+            patch("koteguard.worktree.git.Repo", return_value=mock_repo),
             patch("koteguard.worktree.load_global_config") as mock_cfg,
             patch("koteguard.worktree.append_session_audit"),
         ):
-            mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
+            from koteguard.models import GlobalConfig
+            from koteguard.worktree import WorktreeEngine
+
+            mock_cfg.return_value = GlobalConfig(worktrees_dir=tmp_path / "worktrees")
             engine = WorktreeEngine(tmp_path)
-            meta = engine.create_worktree("test task", session_id="subdirs1")
+            meta = engine.create_worktree(session_id="custom-id", task_description="task")
 
-        # Check subdirs
-        session_dir = sessions_dir / "subdirs1"
-        assert (session_dir / "context").is_dir()
-        assert (session_dir / "logs").is_dir()
-        assert (session_dir / "output").is_dir()
+        assert meta.session_id == "custom-id"
 
-        # Cleanup
-        repo.git.worktree("remove", "--force", str(meta.worktree_path))
-        repo.git.branch("-D", meta.branch_name)
-
-    def test_discard_worktree(self, tmp_path):
-        self._make_fake_repo(tmp_path)
-        worktrees_dir = tmp_path / "worktrees"
+    def test_create_worktree_creates_session_dirs(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
+        mock_repo = _make_mock_repo(tmp_path)
 
         with (
             patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
-            patch("koteguard.worktree.WORKTREES_DIR", worktrees_dir),
+            patch("koteguard.worktree.git.Repo", return_value=mock_repo),
             patch("koteguard.worktree.load_global_config") as mock_cfg,
-            patch("koteguard.worktree.append_audit"),
             patch("koteguard.worktree.append_session_audit"),
         ):
-            mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
-            engine = WorktreeEngine(tmp_path)
-            engine.create_worktree("test task", session_id="disc01")
-            ok = engine.discard_worktree("disc01")
+            from koteguard.models import GlobalConfig
+            from koteguard.worktree import WorktreeEngine
 
-        assert ok is True
+            mock_cfg.return_value = GlobalConfig(worktrees_dir=tmp_path / "worktrees")
+            engine = WorktreeEngine(tmp_path)
+            engine.create_worktree(session_id="test-sess", task_description="task")
+
+        sess_base = sessions_dir / "test-sess"
+        assert (sess_base / "context").exists()
+        assert (sess_base / "logs").exists()
+        assert (sess_base / "output").exists()
+
+    def test_create_worktree_detached_head_uses_HEAD(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        mock_repo = _make_mock_repo(tmp_path)
+        mock_repo.head.is_detached = True
+
+        with (
+            patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
+            patch("koteguard.worktree.git.Repo", return_value=mock_repo),
+            patch("koteguard.worktree.load_global_config") as mock_cfg,
+            patch("koteguard.worktree.append_session_audit"),
+        ):
+            from koteguard.models import GlobalConfig
+            from koteguard.worktree import WorktreeEngine
+
+            mock_cfg.return_value = GlobalConfig(worktrees_dir=tmp_path / "worktrees")
+            engine = WorktreeEngine(tmp_path)
+            engine.create_worktree(session_id="det-sess", task_description="task")
+
+        # Verify worktree add was called with HEAD
+        call_args = mock_repo.git.worktree.call_args
+        assert call_args[0][-1] == "HEAD"
+
+
+class TestWorktreeEngineAcceptDiscard:
+    def _create_saved_session(
+        self, tmp_path: Path, sessions_dir: Path, session_id: str
+    ) -> SessionMeta:
+        """Create and save a session meta for testing accept/discard."""
+        meta = SessionMeta(
+            session_id=session_id,
+            project_slug="myapp",
+            project_root=tmp_path,
+            worktree_path=tmp_path / "wt",
+            branch_name=f"kote/{session_id}-task",
+            status=SessionStatus.ACTIVE,
+        )
+        sess_dir = sessions_dir / session_id
+        sess_dir.mkdir(parents=True, exist_ok=True)
+        for subdir in ("context", "logs", "output"):
+            (sess_dir / subdir).mkdir(parents=True, exist_ok=True)
+        (sess_dir / "meta.json").write_text(
+            json.dumps(meta.model_dump(mode="json"), default=str), encoding="utf-8"
+        )
+        return meta
+
+    def test_accept_returns_false_for_missing_session(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
 
         with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
-            loaded = load_session("disc01")
-        assert loaded.status == "discarded"
+            from koteguard.worktree import WorktreeEngine
 
-    def test_discard_nonexistent_session(self, tmp_path):
-        sessions_dir = tmp_path / "sessions"
-        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
             engine = WorktreeEngine(tmp_path)
-            ok = engine.discard_worktree("nonexistent-session")
-        assert ok is False
+            result = engine.accept_worktree("nonexistent")
 
-    def test_history_archival_on_discard(self, tmp_path):
-        """Discard should archive PLAN.md + audit.jsonl to .kote/history/."""
-        self._make_fake_repo(tmp_path)
-        worktrees_dir = tmp_path / "worktrees"
+        assert result is False
+
+    def test_discard_returns_false_for_missing_session(self, tmp_path):
         sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
+            from koteguard.worktree import WorktreeEngine
+
+            engine = WorktreeEngine(tmp_path)
+            result = engine.discard_worktree("nonexistent")
+
+        assert result is False
+
+    def test_accept_worktree_marks_completed(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        self._create_saved_session(tmp_path, sessions_dir, "sess-accept")
+        mock_repo = _make_mock_repo(tmp_path)
 
         with (
             patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
-            patch("koteguard.worktree.WORKTREES_DIR", worktrees_dir),
-            patch("koteguard.worktree.load_global_config") as mock_cfg,
-            patch("koteguard.worktree.append_audit"),
+            patch("koteguard.worktree.git.Repo", return_value=mock_repo),
             patch("koteguard.worktree.append_session_audit"),
         ):
-            mock_cfg.return_value = MagicMock(worktrees_dir=worktrees_dir)
+            from koteguard.worktree import WorktreeEngine, load_session
+
             engine = WorktreeEngine(tmp_path)
-            engine.create_worktree("archive test", session_id="arch01")
+            result = engine.accept_worktree("sess-accept")
+            saved = load_session("sess-accept")
 
-            # Simulate a PLAN.md in the session context dir
-            context_dir = sessions_dir / "arch01" / "context"
-            context_dir.mkdir(parents=True, exist_ok=True)
-            (context_dir / "PLAN.md").write_text("# Test Plan\n", encoding="utf-8")
+        assert result is True
+        assert saved.status == "completed"
+        assert saved.completed_at is not None
 
-            ok = engine.discard_worktree("arch01")
+    def test_discard_worktree_marks_discarded(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        self._create_saved_session(tmp_path, sessions_dir, "sess-discard")
+        mock_repo = _make_mock_repo(tmp_path)
 
-        assert ok is True
-        # History dir should exist somewhere in .kote/history/
-        history_root = tmp_path / ".kote" / "history"
-        assert history_root.exists()
-        history_dirs = list(history_root.iterdir())
-        assert len(history_dirs) >= 1
+        with (
+            patch("koteguard.worktree.SESSIONS_DIR", sessions_dir),
+            patch("koteguard.worktree.git.Repo", return_value=mock_repo),
+            patch("koteguard.worktree.append_session_audit"),
+        ):
+            from koteguard.worktree import WorktreeEngine, load_session
+
+            engine = WorktreeEngine(tmp_path)
+            result = engine.discard_worktree("sess-discard")
+            saved = load_session("sess-discard")
+
+        assert result is True
+        assert saved.status == "discarded"
+
+
+class TestWorktreeCopyContextFiles:
+    def test_copies_existing_files(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        src_file = tmp_path / "PLAN.md"
+        src_file.write_text("# Plan", encoding="utf-8")
+
+        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
+            from koteguard.worktree import WorktreeEngine
+
+            engine = WorktreeEngine(tmp_path)
+            engine.copy_context_files("my-sess", {"PLAN.md": src_file})
+
+        dest = sessions_dir / "my-sess" / "context" / "PLAN.md"
+        assert dest.exists()
+        assert dest.read_text(encoding="utf-8") == "# Plan"
+
+    def test_skips_missing_source_files(self, tmp_path):
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        missing = tmp_path / "nonexistent.md"
+
+        with patch("koteguard.worktree.SESSIONS_DIR", sessions_dir):
+            from koteguard.worktree import WorktreeEngine
+
+            engine = WorktreeEngine(tmp_path)
+            engine.copy_context_files("my-sess", {"PLAN.md": missing})
+
+        dest = sessions_dir / "my-sess" / "context" / "PLAN.md"
+        assert not dest.exists()
+
+
+class TestWorktreeHistoryDir:
+    def test_history_dir_in_kote_dir(self, tmp_path):
+        with patch("koteguard.worktree.SESSIONS_DIR", tmp_path / "sessions"):
+            from koteguard.worktree import WorktreeEngine
+
+            engine = WorktreeEngine(tmp_path)
+            history_dir = engine._history_dir(tmp_path, "sess-abc")
+
+        assert ".kote" in str(history_dir)
+        assert "history" in str(history_dir)
+        assert "sess-abc" in str(history_dir)

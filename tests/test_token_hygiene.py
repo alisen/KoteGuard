@@ -38,13 +38,16 @@ class TestWorkspaceSummaryAppend:
             workspace_path.write_text("# KoteGuard KB\n", encoding="utf-8")
             # Monkeypatch the home path
             import koteguard.cli as cli_module
+
             with patch.object(cli_module, "console"):
                 with patch("pathlib.Path.home", return_value=tmp_path):
                     # Simulate what _append_workspace_summary does
                     summary = "Implemented login screen. Key decision: use JWT tokens."
                     date_str = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
                     section = f"\n## Session Summary ({date_str})\n\n{summary}\n"
-                    workspace_path.write_text(workspace_path.read_text() + section, encoding="utf-8")
+                    workspace_path.write_text(
+                        workspace_path.read_text() + section, encoding="utf-8"
+                    )
 
         content = workspace_path.read_text()
         assert "Session Summary" in content

@@ -17,12 +17,14 @@ ANDROID_SENSITIVE: dict[str, str] = {
     "*.keystore": "ANDROID_KEYSTORE_STUB",
     "google-services.json": "GOOGLE_SERVICES_STUB",
     "local.properties": "LOCAL_PROPERTIES_STUB",
+    ".env": "ENV_FILE_STUB",
 }
 
 IOS_SENSITIVE: dict[str, str] = {
     "*.p12": "IOS_CERT_STUB",
     "*.mobileprovision": "IOS_PROVISION_STUB",
     "GoogleService-Info.plist": "GOOGLE_SERVICE_INFO_STUB",
+    ".env": "ENV_FILE_STUB",
 }
 
 # ---------------------------------------------------------------------------
@@ -78,6 +80,16 @@ _STUB_CONTENT: dict[str, str] = {
 </dict>
 </plist>
 """,
+    "ENV_FILE_STUB": (
+        "# KoteGuard STUB\n"
+        "# This is a placeholder for a real .env file.\n"
+        "# The real file is NOT present in this worktree for security reasons.\n"
+        "# DO NOT add real API keys, tokens, or passwords here.\n"
+        "# Example structure only:\n"
+        "# API_KEY=\n"
+        "# DATABASE_URL=\n"
+        "# SECRET_TOKEN=\n"
+    ),
 }
 
 _DEFAULT_STUB = "# KoteGuard STUB – real file not present in worktree\n"

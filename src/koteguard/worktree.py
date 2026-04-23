@@ -54,11 +54,11 @@ def save_session(meta: SessionMeta) -> None:
 
 
 def list_sessions() -> list[SessionMeta]:
-    """Return all known sessions."""
+    """Return all known sessions, sorted by created_at ascending (oldest first)."""
     sessions: list[SessionMeta] = []
     if not SESSIONS_DIR.exists():
         return sessions
-    for session_dir in sorted(SESSIONS_DIR.iterdir()):
+    for session_dir in SESSIONS_DIR.iterdir():
         meta_file = session_dir / "meta.json"
         if meta_file.exists():
             try:
@@ -66,6 +66,9 @@ def list_sessions() -> list[SessionMeta]:
                 sessions.append(SessionMeta.model_validate(data))
             except Exception:
                 pass
+    # Sort by created_at so active[-1] always returns the most recently created session.
+    # Folder names are random UUIDs — alphabetical order has no time relationship.
+    sessions.sort(key=lambda s: s.created_at)
     return sessions
 
 
@@ -101,9 +104,7 @@ class WorktreeEngine:
         project_slug = _slugify(project_root.name)
         branch_name = f"kote/{session_id}-{_slugify(task_description)[:30]}"
 
-        worktree_path = (
-            Path(cfg.worktrees_dir) / project_slug / f"{session_id}-{timestamp}"
-        )
+        worktree_path = Path(cfg.worktrees_dir) / project_slug / f"{session_id}-{timestamp}"
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
         if base_branch is None:
@@ -268,6 +269,7 @@ class WorktreeEngine:
 
         # Per-session audit log
         from koteguard.config import SESSIONS_DIR as _SESSIONS_DIR
+
         audit_src = _SESSIONS_DIR / session_id / "logs" / "audit.jsonl"
         if audit_src.exists():
             try:

@@ -22,6 +22,9 @@ SESSIONS_DIR = KOTE_HOME / "sessions"
 WORKTREES_DIR = KOTE_HOME / "worktrees"
 AUDIT_LOG_PATH = KOTE_HOME / "audit.jsonl"
 
+# User-level cache for skills downloaded from github.com/android/skills
+ANDROID_SKILLS_CACHE_DIR = KOTE_HOME / "android-skills"
+
 
 def _ensure_kote_home() -> None:
     """Create ~/.kote directory structure if it doesn't exist."""

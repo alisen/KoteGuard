@@ -35,7 +35,10 @@ def _make_plan(**kwargs) -> PlanModel:
     defaults = dict(
         title="Implement NavGraph",
         objectives=["Add navigation stack"],
-        tasks=[PlanTask(id="t1", description="Create NavGraph"), PlanTask(id="t2", description="Add deep links")],
+        tasks=[
+            PlanTask(id="t1", description="Create NavGraph"),
+            PlanTask(id="t2", description="Add deep links"),
+        ],
         definition_of_done=["All tests pass"],
         estimated_time="1 hour",
     )
@@ -192,8 +195,9 @@ class TestTaskDoneTracking:
             plan_file,
             changed_files=["app/src/main/java/NavGraph.kt"],
         )
-        assert any("done: true" in w or "done:true" in w or "marked" in w.lower()
-                   for w in result.warnings)
+        assert any(
+            "done: true" in w or "done:true" in w or "marked" in w.lower() for w in result.warnings
+        )
 
     def test_done_tasks_dont_trigger_warning(self, tmp_path):
         """If all tasks are marked done, no done-flag warning."""
@@ -209,7 +213,9 @@ class TestTaskDoneTracking:
             changed_files=["app/src/main/java/NavGraph.kt"],
         )
         # No done-flag warning when tasks are marked complete
-        done_warnings = [w for w in result.warnings if "done" in w.lower() and "marked" in w.lower()]
+        done_warnings = [
+            w for w in result.warnings if "done" in w.lower() and "marked" in w.lower()
+        ]
         assert len(done_warnings) == 0
 
 
@@ -266,9 +272,7 @@ class TestSemanticValidation:
             "app/src/main/java/links/DeepLink.kt",
         ]
         result = validate_changes_against_plan(tmp_path, plan_file, changed)
-        task_missing_warnings = [
-            w for w in result.warnings if "no matching changed files" in w
-        ]
+        task_missing_warnings = [w for w in result.warnings if "no matching changed files" in w]
         assert len(task_missing_warnings) == 0
 
     def test_unrelated_files_warn_per_task(self, tmp_path):
@@ -278,9 +282,7 @@ class TestSemanticValidation:
         changed = ["app/src/main/res/values/strings.xml"]  # unrelated
         result = validate_changes_against_plan(tmp_path, plan_file, changed)
         # At least one task should have a "no matching" warning
-        task_missing_warnings = [
-            w for w in result.warnings if "no matching changed files" in w
-        ]
+        task_missing_warnings = [w for w in result.warnings if "no matching changed files" in w]
         assert len(task_missing_warnings) > 0
 
 

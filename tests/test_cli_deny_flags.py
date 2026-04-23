@@ -82,7 +82,11 @@ class TestBuildCopilotCliCommand:
         """Verify the deny-tool syntax matches real Copilot CLI format."""
         cmd = build_copilot_cli_command(tmp_path)
         # Real syntax: --deny-tool='shell(git push)'
-        assert "--deny-tool='shell(" in cmd or '--deny-tool="shell(' in cmd or "--deny-tool='shell(" in cmd
+        assert (
+            "--deny-tool='shell(" in cmd
+            or '--deny-tool="shell(' in cmd
+            or "--deny-tool='shell(" in cmd
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +128,10 @@ class TestCopilotInstructionsEnv:
             captured_env.update(kwargs.get("env", {}))
             return MagicMock()
 
-        with patch("koteguard.launcher.subprocess.Popen", side_effect=mock_popen), \
-             patch("koteguard.launcher.platform.system", return_value="Darwin"):
+        with (
+            patch("koteguard.launcher.subprocess.Popen", side_effect=mock_popen),
+            patch("koteguard.launcher.platform.system", return_value="Darwin"),
+        ):
             launcher.open_terminal()
 
         assert "COPILOT_CUSTOM_INSTRUCTIONS_DIRS" in captured_env
@@ -181,7 +187,9 @@ class TestBuildStarterMessage:
         assert "compileSdk=35" in msg
 
     def test_android_missing_sdk_omitted(self):
-        info = _android_info(android_min_sdk=None, android_target_sdk=None, android_compile_sdk=None)
+        info = _android_info(
+            android_min_sdk=None, android_target_sdk=None, android_compile_sdk=None
+        )
         msg = _build_starter_message(info, _plan())
         assert "minSdk" not in msg
         assert "targetSdk" not in msg
@@ -206,7 +214,9 @@ class TestBuildStarterMessage:
         assert "Task [t2]: Second task" in msg
 
     def test_skills_included_when_present(self):
-        msg = _build_starter_message(_android_info(), _plan(skills=["navigation3", "compose-migration"]))
+        msg = _build_starter_message(
+            _android_info(), _plan(skills=["navigation3", "compose-migration"])
+        )
         assert "navigation3" in msg
         assert "compose-migration" in msg
         assert "Refer to them" in msg
@@ -221,7 +231,9 @@ class TestBuildStarterMessage:
         assert "PLAN.md YAML" in msg
 
     def test_definition_of_done_included(self):
-        msg = _build_starter_message(_android_info(), _plan(dod=["All warnings resolved", "Tests pass"]))
+        msg = _build_starter_message(
+            _android_info(), _plan(dod=["All warnings resolved", "Tests pass"])
+        )
         assert "All warnings resolved" in msg
         assert "Tests pass" in msg
 

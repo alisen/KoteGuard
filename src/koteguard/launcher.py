@@ -101,11 +101,7 @@ def pick_ide(ide_choice: IDEChoice, worktree_path: Path) -> str | None:
 
     has_gradle = any(worktree_path.rglob("build.gradle*"))
     has_xcode = (
-        any(
-            p
-            for p in worktree_path.iterdir()
-            if p.suffix in (".xcodeproj", ".xcworkspace")
-        )
+        any(p for p in worktree_path.iterdir() if p.suffix in (".xcodeproj", ".xcworkspace"))
         if worktree_path.exists()
         else False
     )

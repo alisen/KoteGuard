@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="koteguard.png" alt="KoteGuard" width="600">
+</p>
+
+<p align="center">
   <a href="https://koteguard.com"><img src="https://img.shields.io/badge/website-koteguard.com-blue?style=flat-square" alt="koteguard.com"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square" alt="Python 3.12+">
   <a href="https://pypi.org/project/koteguard/"><img src="https://img.shields.io/pypi/v/koteguard?style=flat-square&label=version&color=orange&include_prereleases=true" alt="PyPI Version"></a>
@@ -6,8 +10,6 @@
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="MIT License">
   <a href="https://github.com/alisen/KoteGuard/actions/workflows/ci.yml"><img src="https://github.com/alisen/KoteGuard/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
 </p>
-
-<h1 align="center">KoteGuard 🛡️</h1>
 
 <p align="center">
   Safe GitHub Copilot agent sandboxing for <strong>Android (Kotlin)</strong> and <strong>iOS (Swift)</strong> developers.
@@ -166,8 +168,15 @@ kote cleanup --accept
 | `kote cleanup --accept --compact` | Accept + save session summary to WORKSPACE.md |
 | `kote validate [plan.md]` | Validate PLAN.md against schema |
 | `kote validate -w WORKSPACE.md` | Also validate WORKSPACE.md |
-| `kote android skills` | List bundled skills + suggest for current project |
+| `kote android skills` | List all skills (cached + bundled) + suggest for current project |
+| `kote android update` | Sync latest skill guides from `github.com/android/skills` |
+| `kote android update --token <PAT>` | Same, with a GitHub token to avoid rate limits |
 | `kote android docs` | Android KB links + worktree status |
+| `kote ios skills` | List bundled iOS skill guides + suggest for current project |
+| `kote sessions prune` | Remove completed/discarded session metadata older than 30 days |
+| `kote sessions prune --days N` | Prune sessions older than N days |
+| `kote sessions prune --dry-run` | Preview which sessions would be pruned |
+| `kote init` | Interactively configure global defaults (agent mode, IDE, worktrees dir) |
 | `kote version` | Print version |
 
 ### Tips & Gotchas
@@ -194,8 +203,27 @@ KoteGuard bundles best-practice SKILL.md guides that get injected into the agent
 | `compose-migration` | `androidx.compose` dependency | State hoisting, `collectAsStateWithLifecycle`, `LazyColumn` keys |
 
 ```bash
-kote android skills   # see what's available + what's suggested
+kote android update   # sync latest skill guides from github.com/android/skills
+kote android skills   # see all skills (official + bundled) + what's suggested
 kote android docs     # Android developer documentation links
+```
+
+KoteGuard also runs a **nightly GitHub Actions workflow** (`.github/workflows/sync-android-skills.yml`) that automatically checks `github.com/android/skills` for updates and opens a PR against `main` whenever skill content changes — so bundled guides stay up to date without any manual work.
+
+---
+
+## iOS Skills
+
+KoteGuard also bundles best-practice guides for iOS/Swift developers. The scanner auto-detects relevant guides based on your Swift source files.
+
+| Skill | Triggered by | Guide covers |
+|-------|-------------|--------------|
+| `swiftui-patterns` | `import SwiftUI` / `@Observable` | State management, `NavigationStack`, scene lifecycle, performance rules |
+| `swift-concurrency` | `async`/`await`/`actor` usage | Structured concurrency, `AsyncStream`, cancellation, `@MainActor` |
+| `xctest` | `import XCTest` / `SnapshotTesting` | Async tests, protocol mocking, snapshot testing, performance tests |
+
+```bash
+kote ios skills   # see what's available + what's suggested for your project
 ```
 
 ---

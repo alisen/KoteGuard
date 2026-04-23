@@ -38,9 +38,9 @@ class IDEChoice(StrEnum):
 class AgentMode(StrEnum):
     """How the Copilot agent is invoked for a session."""
 
-    COPILOT_CLI = "copilot-cli"       # terminal: copilot binary with deny-tool flags
+    COPILOT_CLI = "copilot-cli"  # terminal: copilot binary with deny-tool flags
     COPILOT_PLUGIN = "copilot-plugin"  # IDE plugin: no CLI command generated
-    NONE = "none"                      # instructions injected only, no tool launched
+    NONE = "none"  # instructions injected only, no tool launched
 
 
 # ---------------------------------------------------------------------------
@@ -62,17 +62,13 @@ class TaskModel(BaseModel):
     session_id: str = Field(..., description="Unique session identifier")
     description: str = Field(..., min_length=1, description="What the agent must do")
     context: str = Field(default="", description="Extra context for the agent")
-    constraints: list[str] = Field(
-        default_factory=list, description="Rules the agent must follow"
-    )
+    constraints: list[str] = Field(default_factory=list, description="Rules the agent must follow")
 
     @field_validator("session_id")
     @classmethod
     def session_id_slug(cls, v: str) -> str:
         if not re.match(r"^[a-z0-9][a-z0-9\-]{2,}$", v):
-            raise ValueError(
-                "session_id must be lowercase alphanumeric with hyphens (min 3 chars)"
-            )
+            raise ValueError("session_id must be lowercase alphanumeric with hyphens (min 3 chars)")
         return v
 
 
@@ -184,6 +180,9 @@ class ProjectInfo(BaseModel):
     knowledge_base_status: str = "unknown"
     doc_summary: dict[str, list[str]] = Field(default_factory=dict)
 
+    # iOS skill detection
+    ios_detected_skills: list[str] = Field(default_factory=list)
+
     model_config = {"arbitrary_types_allowed": True}
 
 
@@ -242,15 +241,9 @@ class GlobalConfig(BaseModel):
     """~/.kote/config.toml schema."""
 
     default_ide: IDEChoice = IDEChoice.AUTO
-    worktrees_dir: Path = Field(
-        default_factory=lambda: Path.home() / ".kote" / "worktrees"
-    )
-    sessions_dir: Path = Field(
-        default_factory=lambda: Path.home() / ".kote" / "sessions"
-    )
-    audit_log: Path = Field(
-        default_factory=lambda: Path.home() / ".kote" / "audit.jsonl"
-    )
+    worktrees_dir: Path = Field(default_factory=lambda: Path.home() / ".kote" / "worktrees")
+    sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".kote" / "sessions")
+    audit_log: Path = Field(default_factory=lambda: Path.home() / ".kote" / "audit.jsonl")
     auto_open_ide: bool = True
     android_cli_version: str = ""
     skills_repo_url: str = "https://github.com/android/skills"
