@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.0a5 (latest) | ✅ |
-| < 1.0.0a5 | ❌ |
+| 1.0.0a6 (latest) | ✅ |
+| < 1.0.0a6 | ❌ |
 
 ## Reporting a Vulnerability
 

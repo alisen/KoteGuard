@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="koteguard.png" alt="KoteGuard" width="600">
+  <img src="https://raw.githubusercontent.com/alisen/KoteGuard/main/koteguard.png" alt="KoteGuard" width="600">
 </p>
 
 <p align="center">
