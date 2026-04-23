@@ -26,14 +26,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Update SECURITY.md files
+      - name: Update SECURITY.md
         run: python .github/scripts/update_security_version.py
 
       - name: Commit updated SECURITY.md (if changed)
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add SECURITY.md .github/SECURITY.md
+          git add SECURITY.md
           # Only commit when there is actually something staged
           if git diff --cached --quiet; then
             echo "No changes to commit."

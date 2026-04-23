@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Update the Supported Versions table in SECURITY.md files to match the
+Update the Supported Versions table in SECURITY.md to match the
 version declared in pyproject.toml.
 
 Usage:
@@ -51,25 +51,11 @@ def main() -> None:
     version = get_version()
     print(f"Version from pyproject.toml: {version}")
 
-    targets = [
-        ROOT / "SECURITY.md",
-        ROOT / ".github" / "SECURITY.md",
-    ]
-
-    any_changed = False
-    for target in targets:
-        if not target.exists():
-            print(f"  SKIP (not found): {target.relative_to(ROOT)}")
-            continue
-        changed = update_security_md(target, version)
-        status = "UPDATED" if changed else "already up-to-date"
-        print(f"  {status}: {target.relative_to(ROOT)}")
-        any_changed = any_changed or changed
-
-    if any_changed:
-        print("Done — SECURITY.md files updated.")
-    else:
-        print("Done — nothing to change.")
+    target = ROOT / "SECURITY.md"
+    changed = update_security_md(target, version)
+    status = "UPDATED" if changed else "already up-to-date"
+    print(f"  {status}: SECURITY.md")
+    print("Done — SECURITY.md updated." if changed else "Done — nothing to change.")
 
 
 if __name__ == "__main__":
