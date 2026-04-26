@@ -1,127 +1,123 @@
-# Jetpack Compose Migration
+---
+name: migrate-xml-views-to-jetpack-compose
+description: Provides a structured workflow for migrating an Android XML View to Jetpack
+  Compose. This skill details the step-by-step process, from planning and dependency
+  setup, to theming and layout migration, validation and XML cleanup. Use this skill
+  when you need to migrate an XML View to Jetpack Compose in an Android project. It
+  solves the problem of converting the UI of a legacy XML View into modern, declarative
+  Compose components while maintaining interoperability.
+license: Complete terms in LICENSE.txt
+metadata:
+  author: Google LLC
+  keywords:
+  - Jetpack Compose
+  - migration
+  - XML
+  - Views
+  - interoperability
+  - incremental adoption
+  - UI development
+---
 
-Best practices for migrating from View-based UI to Jetpack Compose.
+This skill guides through the process of migrating an existing Android XML View
+to Jetpack Compose. It performs a stable, safe and visually consistent
+transition by following a structured, 10-step methodology. This skill migrates
+UI (XML to Jetpack Compose) only.
 
-## Overview
+## Objective
 
-Compose is Android's modern declarative UI toolkit. Migration is incremental – you can mix Compose and Views using `ComposeView` and `AndroidView` interop.
+To systematically convert a single legacy XML layout into modern, declarative
+Jetpack Compose UI while maintaining pixel-perfect visual parity and functional
+integrity.
 
-## Migration Strategy
+## Summary of the 10-step migration process
 
-### Phase 1: Leaf Screens First
+1. **Identify the optimal XML candidate for migration**
+2. **Analyze the project and layout**
+3. **Create a plan**
+4. **Capture the XML View UI**
+5. **Set up Compose dependencies and compiler**
+6. **Set up Compose theming**
+7. **Migrate the XML layout to Compose**
+8. **Validate the migration**
+9. **Replace usages**
+10. **XML code removal**
 
-Migrate simple, self-contained screens first (settings, detail views, dialogs) before complex screens (home, main).
+## Detailed steps
 
-```kotlin
-// In your existing XML layout, add ComposeView:
-// res/layout/fragment_settings.xml
-<androidx.compose.ui.platform.ComposeView
-    android:id="@+id/compose_view"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent" />
+### Step 1: Identify the optimal XML candidate for migration
 
-// In your Fragment:
-override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-    view.findViewById<ComposeView>(R.id.compose_view).setContent {
-        MaterialTheme {
-            SettingsScreen()
-        }
-    }
-}
-```
+If the user has explicitly specified a target XML layout, proceed to Step 2.
+Otherwise, analyze the codebase to identify the best candidate for migration by
+following the logic in [references/identify-optimal-xml-candidate.md](references/identify-optimal-xml-candidate.md).
 
-### Phase 2: Fragment → Composable
+### Step 2: Analyze the project and layout
 
-Once all screens are Compose, replace Fragment navigation with Navigation Compose.
+Analyze the identified XML View's structure, hierarchy, and implementation
+details.
+Use [references/analysis-of-the-project-and-layout.md](references/analysis-of-the-project-and-layout.md) to
+guide your technical audit of the layout and surrounding project context.
 
-### Phase 3: Remove View System
+### Step 3: Create a plan
 
-Remove XML layouts, Fragments (if all replaced), and View-system theme attributes.
+Using the outputs and analysis done in the Step 1 and 2, generate a
+step-by-step plan for the migration. If you support user interaction, present
+to the user and ask for approval before proceeding. If user interaction is not
+supported, proceed to Step 4 following the generated plan.
 
-## Key Patterns
+### Step 4: Capture the XML View UI
 
-### ViewModel Integration
+**IF** you support user interaction, ask the user to upload a screenshot of the
+XML View UI or provide an absolute path to a file. Use this image as a visual
+reference for the layout migration in Step 7.
+**ELSE IF** you are able to run an Android emulator, locate an existing
+screenshot test for the XML candidate. If none exists, create one using the
+existing project testing framework. If no framework exists,
+use **UI Automator** or **Espresso** to create a screenshot test with minimum
+required setup. Run the test and take a baseline screenshot of the XML UI.
+**ELSE** proceed to Step 5.
 
-```kotlin
-@Composable
-fun ProfileScreen(viewModel: ProfileViewModel = viewModel()) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    ProfileContent(uiState = uiState)
-}
-```
+### Step 5: Set up Compose dependencies and compiler
 
-### Material 3 Theme
+Check `build.gradle` or `libs.versions.toml` for Compose dependencies and
+compiler setup. If missing, use
+[Setup Compose Dependencies and Compiler](references/android/develop/ui/compose/setup-compose-dependencies-and-compiler.md).
+Run a sync to ensure dependencies resolve without errors.
 
-```kotlin
-@Composable
-fun MyAppTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = dynamicColorScheme(), // or lightColorScheme/darkColorScheme
-        typography = AppTypography,
-        content = content,
-    )
-}
-```
+### Step 6: Set up Compose theming
 
-### Lists (LazyColumn)
+If the project already has Compose theming set up, proceed to Step 7. If Compose
+theming is missing, initialize it. For Material-based projects, follow
+[Material 3 migration guidelines](references/android/develop/ui/compose/designsystems/migrate-xml-theme-to-compose.md).
+For custom design systems, apply expert judgment to migrate XML theming and
+match existing styles.
+**Constraints:** Do not migrate the entire theme. Implement only the minimum
+theming required for the specific XML candidate. Maintain original XML themes
+for interoperability. Maintain existing project code conventions, patterns,
+names and values.
 
-```kotlin
-LazyColumn {
-    items(items = list, key = { it.id }) { item ->
-        ItemRow(item = item)
-    }
-}
-```
+### Step 7: Migrate the XML View to Compose
 
-### State Hoisting
+Convert the XML candidate to Jetpack Compose code, referencing
+[references/xml-layout-migration.md](references/xml-layout-migration.md) and the image from Step 4.
+You must include a **Compose Preview** for the newly created composable to
+facilitate visual verification.
 
-```kotlin
-// WRONG: state inside composable (not testable/reusable)
-@Composable
-fun Counter() {
-    var count by remember { mutableIntStateOf(0) }
-    Button(onClick = { count++ }) { Text("$count") }
-}
+### Step 8: Replace usages
 
-// CORRECT: hoist state up
-@Composable
-fun Counter(count: Int, onIncrement: () -> Unit) {
-    Button(onClick = onIncrement) { Text("$count") }
-}
-```
+Replace the usages of the migrated XML layout to use the new Compose component.
 
-## Best Practices
+- To add Compose in Views, use [Compose in Views](references/android/develop/ui/compose/migrate/interoperability-apis/compose-in-views.md).
+- To add Views in Compose, use [Views in Compose](references/android/develop/ui/compose/migrate/interoperability-apis/views-in-compose.md).
 
-1. **Hoist state** – keep composables stateless where possible
-2. **Use `collectAsStateWithLifecycle`** – NOT `collectAsState` (lifecycle-aware)
-3. **One `MaterialTheme` per app** – wrap at the root Activity/NavHost level
-4. **Use `key` in `LazyColumn.items`** – prevents recomposition issues with moving items
-5. **Avoid side effects in composables** – use `LaunchedEffect`, `SideEffect`, `DisposableEffect`
-6. **Preview with `@Preview`** – create light/dark and multiple size previews
+### Step 9: Validate the migration
 
-## Performance
+Compare the baseline screenshot image from Step 4 with the rendered Compose
+Preview of the new composable. Ignore string content; focus on layout and
+styling. Iterate on the Compose code until visual parity is achieved. Once
+verified, write a Compose UI test for the new composable.
 
-- Use `remember` and `derivedStateOf` to minimize recomposition
-- Use `Stable` / `Immutable` annotations on data classes passed to composables
-- Profile with Compose Compiler metrics: `./gradlew assembleRelease -PcomposeCompilerReports=true`
+### Step 10: XML code removal
 
-## Forbidden Patterns
-
-- Do NOT call `invalidate()` or `requestLayout()` from Compose
-- Do NOT use `View.VISIBLE/GONE` inside composables – use `if` conditions
-- Do NOT create `Composable` functions that return a value
-
-## Dependencies
-
-```kotlin
-// build.gradle.kts (app)
-dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
-    implementation(composeBom)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.+")
-    debugImplementation("androidx.compose.ui:ui-tooling")
-}
-```
+Delete the migrated XML file and its associated legacy tests. **Caution:** Only
+remove code and resources that are not referenced by other parts of the project.
