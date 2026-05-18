@@ -205,4 +205,3 @@ update
           Usage: android update [--url=PARAM]
           Update the Android CLI
                 --url=PARAM   The URL to download the update from
-
