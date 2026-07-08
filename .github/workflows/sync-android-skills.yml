@@ -1,25 +1,43 @@
 name: Sync Android Skills
 
 # Runs every night at 02:00 UTC and checks whether google's android/skills repo
-# has new or updated SKILL.md files.  If anything changed, opens a PR against
-# main so the update can be reviewed before it ships to users.
+# has new or updated SKILL.md files. If anything changed, it (re)builds a single
+# fixed branch on top of the latest main (effectively a nightly rebase) and
+# keeps ONE pull request open until it is merged. If repo auto-merge is enabled
+# (Settings > General > Allow auto-merge), the PR merges itself once checks pass.
 
 on:
   schedule:
     - cron: "0 2 * * *"   # nightly at 02:00 UTC
   workflow_dispatch:        # allow manual trigger from the Actions tab
 
+env:
+  SYNC_BRANCH: chore/sync-android-skills
+
 jobs:
   sync:
     name: Fetch & diff android/skills
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # push the update branch
-      pull-requests: write  # open the PR
+      contents: write       # push the update branch, delete stale branches
+      pull-requests: write  # open / auto-merge the PR
 
     steps:
       - name: Checkout KoteGuard
         uses: actions/checkout@v6
+
+      - name: Delete stale dated sync branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Old scheme created one dated branch per night (chore/sync-android-skills-YYYYMMDD).
+          # Prune them all; deleting the head branch of an open PR also closes that PR.
+          git ls-remote --heads origin "refs/heads/${SYNC_BRANCH}-2*" \
+            | awk '{print $2}' | sed 's#^refs/heads/##' \
+            | while read -r branch; do
+                echo "Deleting stale branch: $branch"
+                git push origin --delete "$branch" || true
+              done
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -38,26 +56,37 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit changes
+      - name: Commit changes on fixed branch (rebased onto main)
         if: steps.diff.outputs.changed == 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b chore/sync-android-skills-$(date +%Y%m%d)
+          # -B: (re)create the branch from current main checkout, so the PR is
+          # always exactly main + one sync commit.
+          git checkout -B "$SYNC_BRANCH"
           git add templates/android-skills/
           git commit -m "chore: sync Android skill guides from github.com/android/skills"
 
-      - name: Push branch
+      - name: Push branch (force — keeps the open PR up to date)
         if: steps.diff.outputs.changed == 'true'
-        run: git push origin HEAD --force
+        run: git push origin "$SYNC_BRANCH" --force
 
-      - name: Open PR
+      - name: Open PR if none exists
         if: steps.diff.outputs.changed == 'true'
+        id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          EXISTING=$(gh pr list --head "$SYNC_BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING already open — branch update refreshed it."
+            echo "number=$EXISTING" >> "$GITHUB_OUTPUT"
+            DATE=$(date +%Y-%m-%d)
+            gh pr edit "$EXISTING" --title "chore: sync Android skill guides (updated $DATE)"
+            exit 0
+          fi
           DATE=$(date +%Y-%m-%d)
-          gh pr create \
+          URL=$(gh pr create \
             --title "chore: sync Android skill guides ($DATE)" \
             --body "$(cat <<'EOF'
           ## Nightly Android Skills Sync
@@ -66,8 +95,8 @@ jobs:
           It updates the bundled skill guides in `templates/android-skills/` to match
           the latest content from [github.com/android/skills](https://github.com/android/skills).
 
-          ### What changed
-          See the file diff for details.
+          It is rebuilt on top of `main` every night until merged — there is only
+          ever one open sync PR.
 
           ### How to review
           - Check that existing skill content looks correct
@@ -78,4 +107,18 @@ jobs:
           EOF
           )" \
             --base main \
-            --label "dependencies"
+            --head "$SYNC_BRANCH" \
+            --label "dependencies")
+          echo "number=$(basename "$URL")" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge (no-op unless repo allows it)
+        if: steps.diff.outputs.changed == 'true' && steps.pr.outputs.number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Requires "Allow auto-merge" in Settings > General. With branch
+          # protection requiring the CI checks, the PR merges itself when green.
+          # If the setting is off this step fails harmlessly and the PR simply
+          # waits for a manual merge.
+          gh pr merge "${{ steps.pr.outputs.number }}" --auto --squash --delete-branch
