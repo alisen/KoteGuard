@@ -99,10 +99,12 @@ class TestRequireGitRepo:
 
     def test_exits_1_outside_repo(self):
         """A plain directory with no .git should raise typer.Exit(1)."""
-        import click
         import typer
 
-        with pytest.raises((typer.Exit, click.exceptions.Exit)):
+        # NOTE: don't `import click` here — modern typer vendors click and no
+        # longer declares it as a dependency, so `click` is absent on clean CI
+        # environments (this broke the nightly sync PRs).
+        with pytest.raises(typer.Exit):
             with patch("git.Repo", side_effect=git.InvalidGitRepositoryError("no repo")):
                 _require_git_repo(Path("/tmp"))
 
