@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout KoteGuard
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # SYNC_TOKEN (fine-grained PAT) makes pushes/PRs come from the repo
           # owner, so pull_request workflows trigger without manual approval.

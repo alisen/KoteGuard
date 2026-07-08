@@ -15,7 +15,7 @@ jobs:
       contents: write   # needed to commit and push the updated SECURITY.md
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Use a token so the push can trigger downstream workflows if needed.
           # Falls back to the default GITHUB_TOKEN (which is fine for most repos).
