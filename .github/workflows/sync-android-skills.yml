@@ -25,10 +25,15 @@ jobs:
     steps:
       - name: Checkout KoteGuard
         uses: actions/checkout@v6
+        with:
+          # SYNC_TOKEN (fine-grained PAT) makes pushes/PRs come from the repo
+          # owner, so pull_request workflows trigger without manual approval.
+          # Falls back to GITHUB_TOKEN if the secret is not configured.
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Delete stale dated sync branches
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           # Old scheme created one dated branch per night (chore/sync-android-skills-YYYYMMDD).
           # Prune them all; deleting the head branch of an open PR also closes that PR.
@@ -75,7 +80,7 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           EXISTING=$(gh pr list --head "$SYNC_BRANCH" --base main --state open --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
@@ -115,7 +120,7 @@ jobs:
         if: steps.diff.outputs.changed == 'true' && steps.pr.outputs.number != ''
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           # Requires "Allow auto-merge" in Settings > General. With branch
           # protection requiring the CI checks, the PR merges itself when green.
