@@ -15,11 +15,9 @@ jobs:
       contents: write   # needed to commit and push the updated SECURITY.md
 
     steps:
+      # Note: checkout uses the default GITHUB_TOKEN. Pushes made with it do
+      # NOT trigger downstream workflows — that's intentional here ([skip ci]).
       - uses: actions/checkout@v6
-        with:
-          # Use a token so the push can trigger downstream workflows if needed.
-          # Falls back to the default GITHUB_TOKEN (which is fine for most repos).
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -40,5 +38,8 @@ jobs:
           else
             VERSION=$(python -c "import re, sys; m=re.search(r'version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()); print(m.group(1))")
             git commit -m "chore: sync SECURITY.md to v${VERSION} [skip ci]"
+            # Guard against non-fast-forward on back-to-back pushes to main.
+            # (Rebase must come after the commit — a dirty index blocks it.)
+            git pull --rebase origin main
             git push
           fi
