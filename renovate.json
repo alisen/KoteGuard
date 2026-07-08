@@ -6,10 +6,13 @@
   ],
   "timezone": "Europe/Berlin",
   "schedule": ["before 6am on monday"],
+  "pip-compile": {
+    "managerFilePatterns": ["/^constraints\\.txt$/"]
+  },
   "packageRules": [
     {
       "description": "Group all Python dependencies into one weekly PR",
-      "matchManagers": ["pep621"],
+      "matchManagers": ["pep621", "pip-compile"],
       "groupName": "python dependencies"
     },
     {

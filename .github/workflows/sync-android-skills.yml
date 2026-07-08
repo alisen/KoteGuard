@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout KoteGuard
-        uses: actions/checkout@v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # SYNC_TOKEN (fine-grained PAT) makes pushes/PRs come from the repo
           # owner, so pull_request workflows trigger without manual approval.
@@ -45,7 +45,7 @@ jobs:
               done
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
