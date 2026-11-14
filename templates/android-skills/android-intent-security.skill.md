@@ -1,13 +1,15 @@
 ---
 name: android-intent-security
-description: Best practices for Android Intent security. Use this skill when auditing
-  component configurations in AndroidManifest.xml activities, services, receivers)
-  or source code handling incoming Intents (getIntent, getParcelableExtra) to prevent
-  Intent Redirection and unauthorized access.
+description: Audits, detects, and remediates Android Intent and component security
+  vulnerabilities. Use this skill when auditing component configurations in AndroidManifest.xml
+  (activities, services, receivers) or source code handling incoming Intents (getIntent,
+  getParcelableExtra) to prevent Intent Redirection and unauthorized access. Don't
+  use for network security, TLS configuration, or general runtime permission request
+  flows.
 license: Complete terms in LICENSE.txt
 metadata:
   author: Google LLC
-  last-updated: '2026-08-06'
+  last-updated: '2026-11-08'
   keywords:
   - recipe
   - Android
@@ -19,23 +21,24 @@ metadata:
   - Service
   - Signature
   - Verification
-  - sanitizer
+  - IntentSanitizer
   - Vulnerability
-  - Best Practices
 ---
 
-This skill provides guidelines and patterns to secure Android components (Activities, Services, Broadcast Receivers, Content Providers) and handle Intents safely, preventing privilege escalation and unauthorized access.
+This skill provides guidelines and patterns to secure Android components
+(Activities, Services, Broadcast Receivers, Content Providers) and handle
+Intents safely, preventing privilege escalation and unauthorized access.
 
 ## Glossary
 
 - **Intent:** An asynchronous messaging object used to request an action from another app component.
-- **Exported component:** A component (`android:exported="true"`) that can be launched by other apps on the device.
+- **Exported component:** A component (`android:exported="true"`) accessible to other apps on the device.
 - **Sticky intent:** A broadcast intent that remains in the system cache after it's sent, allowing any app to retrieve its contents.
 - **Signature permission:** A permission whose protection level is set to `signature`, granted only to apps signed with the same developer key.
 - **onNewIntent:** An activity lifecycle callback invoked when an activity is launched with `FLAG_ACTIVITY_SINGLE_TOP` and is already running at the top of the history stack.
 - **PendingIntent:** A token granted to a foreign application (for example, system services) allowing it to execute a predefined Intent with the creator's permissions.
-- **Mutable PendingIntent:** A PendingIntent whose underlying Intent parameters can be modified by the receiving application.
-- **ContentProvider:** A component that encapsulates data and provides it to other applications via standard query/insert interfaces.
+- **Mutable PendingIntent:** A PendingIntent that allows the receiving application to modify its underlying Intent parameters.
+- **ContentProvider:** A component that encapsulates data and provides it to other applications using standard query and insert interfaces.
 - **IntentSanitizer:** A utility class in AndroidX Core used to build a safe, sanitized copy of an incoming Intent by filtering out unauthorized components, actions, or extras.
 - **Intent redirection (forwarding):** A vulnerability where an application receives an intent from an untrusted source and uses it to launch a private, non-exported component.
 
@@ -82,19 +85,71 @@ Evaluate the security implications of PendingIntent mutability flags:
 
 ### 3. Intent handling and redirection logic
 
-IF (the component receives a nested Intent as an extra) { IF (AndroidX Core 1.9.0+ and higher is available) { MUST construct an `IntentSanitizer` to explicitly allowlist components, actions, data, and extras. MUST call `sanitizeByThrowing()` or `sanitizeByFiltering()` before launching. } ELSE { MUST verify that the nested Intent's target package matches the current application package. MUST verify that the target component of the nested Intent is publicly exported. } NEVER launch the nested Intent directly without validation. } ELSE IF (the component handles broadcasts) { MUST rely on the system's Protected Broadcast mechanism for system events (which guarantees the sender is the system framework). MUST protect custom receivers with signature-level permissions or use `RECEIVER_NOT_EXPORTED` for dynamic receivers to restrict the sender. }
+IF (the component receives a nested Intent as an extra) {
+IF (AndroidX Core 1.9.0+ and higher is available) {
+MUST construct an `IntentSanitizer` with an explicit allowlist of
+components, actions, data, and extras.
+MUST call `sanitizeByThrowing()` or `sanitizeByFiltering()` before
+launching.
+} ELSE {
+MUST reject or strip URI permission grant flags
+(`FLAG_GRANT_READ_URI_PERMISSION`, `FLAG_GRANT_WRITE_URI_PERMISSION`,
+`FLAG_GRANT_PERSISTABLE_URI_PERMISSION`,
+`FLAG_GRANT_PREFIX_URI_PERMISSION`).
+MUST resolve the target component using `resolveActivity()` and verify
+that both its `packageName` and `className` are on an explicit
+allowlist.
+}
+NEVER launch the nested Intent directly without validation.
+}
+
+IF (the component handles broadcasts) {
+MUST rely on the system's Protected Broadcast mechanism for system events
+(which verifies that the sender is the system framework).
+MUST protect custom receivers with signature-level permissions or use
+`RECEIVER_NOT_EXPORTED` for dynamic receivers to restrict the sender.
+IF (using `ContextCompat.registerReceiver` with `RECEIVER_NOT_EXPORTED` AND
+`minSdk < 33`) {
+MUST verify that the
+`${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`
+`<permission>` (with `android:protectionLevel="signature"`) and
+`<uses-permission>` elements are declared in `AndroidManifest.xml`.
+}
+}
 
 ### 4. PendingIntent security logic
 
-IF (a PendingIntent is created for delivery to another application) { MUST use `PendingIntent.FLAG_IMMUTABLE` by default. IF (the PendingIntent must be mutable) { MUST set the explicit target component or package name on the base `Intent`. NEVER create an implicit, mutable `PendingIntent`. } }
+IF (a PendingIntent is created for delivery to another application) {
+MUST use `PendingIntent.FLAG_IMMUTABLE` by default.
+IF (the PendingIntent must be mutable) {
+MUST set the explicit target component or package name on the base
+`Intent`.
+NEVER create an implicit, mutable `PendingIntent`.
+}
+}
 
 ### 5. ContentProvider security logic
 
-IF (the ContentProvider is only for internal app use) { MUST set `android:exported="false"`. } ELSE { MUST protect it with `android:readPermission` and `android:writePermission`. MUST set `android:grantUriPermissions="false"` unless temporary URL access is strictly required. }
+IF (the ContentProvider is only for internal app use) {
+MUST set `android:exported="false"`.
+} ELSE {
+MUST protect it with `android:readPermission` and `android:writePermission`.
+MUST set `android:grantUriPermissions="false"` unless temporary URL access
+is strictly required.
+}
 
 ### 6. Service caller verification logic
 
-IF (an exported service communicates with trusted sister/partner apps) { MUST retrieve the calling UID using `Binder.getCallingUid()` and resolve it to package names using `PackageManager.getPackagesForUid()`. MUST verify that the calling package signature fingerprint matches your trusted certificate hash. }
+IF (an exported service communicates with trusted sister or partner apps) {
+MUST expose a cross-process interface (such as an AIDL `Stub` or
+`Messenger`) instead of a local `Binder` subclass.
+MUST read the caller UID on every IPC request using
+`Binder.getCallingUid()` in AIDL or `Message.sendingUid` in `Messenger`.
+MUST reject `callingUid == Process.myUid()` so calls outside an active IPC
+transaction fail closed.
+MUST verify that the calling package signing certificate matches the
+trusted certificate hash.
+}
 
 *** ** * ** ***
 
@@ -102,14 +157,14 @@ IF (an exported service communicates with trusted sister/partner apps) { MUST re
 
 ### 1. Safe intent redirection (manual verification)
 
-Validate the target of a nested intent before launching it when modern sanitization libraries are unavailable.
+Validate the target of a nested intent before launching it when modern
+sanitization libraries are unavailable.
 
 - **Expected Inputs:**
   - An incoming `Intent` containing a nested `Intent` extra named `EXTRA_NESTED_INTENT`.
 - **Expected Outputs:**
   - Launches the target component if safe; throws `SecurityException` if validation fails.
 
-<br />
 
 ```kotlin
 fun safeIntentRedirectionManual() {
@@ -128,96 +183,91 @@ fun safeIntentRedirectionManual() {
             throw SecurityException("Nested intent contains forbidden URI permission grant flags!")
         }
 
-        val pm = packageManager
-        val target = nestedIntent.resolveActivity(pm)
-        if (target != null) {
-            // 2. Verify target is within the same package
-            if (target.packageName != packageName) {
-                throw SecurityException("Cross-app intent redirection is forbidden!")
-            }
-            try {
-                // 3. Verify target activity is exported
-                val info = pm.getActivityInfo(target, 0)
-                if (!info.exported) {
-                    throw SecurityException("Target activity is private: ${target.className}")
-                }
-                // 4. Explicitly set the component to prevent intent interception
-                nestedIntent.component = target
-                // Safe to launch
-                startActivity(nestedIntent)
-            } catch (e: PackageManager.NameNotFoundException) {
-                Log.e("Security", "Failed to resolve target activity", e)
-            }
+        // 2. Clear any selector intent that could override resolution
+        nestedIntent.selector = null
+
+        // 3. Resolve the target activity and verify both packageName and className
+        //    match the expected allowlisted destination
+        val target = nestedIntent.resolveActivity(packageManager)
+        if (target != null &&
+            target.packageName == packageName &&
+            target.className == TargetActivity::class.java.name
+        ) {
+            // 4. Explicitly pin the resolved component to prevent intent interception
+            nestedIntent.component = target
+            startActivity(nestedIntent)
+        } else {
+            throw SecurityException("Invalid or disallowed redirect target: $target")
         }
     }
 }
-   
 ```
 
 <br />
 
 ### 2. Safe intent redirection using IntentSanitizer
 
-Filter or reject dynamic intents using AndroidX `IntentSanitizer` (AndroidX Core 1.9.0+).
+Filter or reject dynamic intents using AndroidX `IntentSanitizer` (AndroidX Core
+1.9.0+).
 
 - **Expected Inputs:**
   - An untrusted incoming `Intent`.
 - **Expected Outputs:**
-  - `Intent`: A sanitized copy containing only allowlisted components, categories, and actions. Throws `SecurityException` on violations if using `sanitizeByThrowing()`.
+  - `Intent`: A sanitized copy containing only components, categories, and actions on the allowlist. Throws `SecurityException` on violations if using `sanitizeByThrowing()`.
 
-<br />
 
 ```kotlin
 fun safeIntentRedirectionSanitizer() {
-    val untrustedIntent = IntentCompat.getParcelableExtra(intent, "EXTRA_NESTED_INTENT", Intent::class.java)
-    if (untrustedIntent != null) {
-        // Define the strict boundaries for allowed redirection target
-        val sanitizer = IntentSanitizer.Builder()
-            .allowComponent(ComponentName("com.example.app", "com.example.app.SafeTargetActivity")) // Explicitly allowed target
-            .allowAction(Intent.ACTION_VIEW) // Explicitly allowed actions
-            .allowDataWithAuthority("com.example.app.provider") // Allowed URI authority
-            .allowType("text/plain") // Allowed mime type
-            .allowExtra("user_display_name", String::class.java) // Safe type-enforced extras
-            // Note: URI permission flags are NOT allowed, so the sanitizer will automatically strip or throw on them
-            .build()
+    // Allowlist: anything NOT listed is rejected (only component is required; other fields are optional).
+    // No allowFlags(): every flag, including FLAG_GRANT_*_URI_PERMISSION, is rejected.
+    val sanitizer = IntentSanitizer.Builder()
+        .allowComponent(ComponentName(this, TargetActivity::class.java))
+        .allowAction(Intent.ACTION_VIEW)
+        .allowData { it.scheme == ContentResolver.SCHEME_CONTENT && it.authority == "$packageName.provider" }
+        .allowType("text/plain")
+        .allowExtra("user_display_name", String::class.java) { it.length <= 100 } // type and content
+        .build()
 
-        try {
-            // Option A: Throws SecurityException if the intent violates policies
-            val safeIntent = sanitizer.sanitizeByThrowing(untrustedIntent)
-            startActivity(safeIntent)
-        } catch (e: SecurityException) {
-            Log.e("SECURITY_ALERT", "Attempted launch of non-allowlisted intent blocked", e)
-        }
-
-        // Option B: Silently filter and launch only the authorized parts (no exception thrown)
-        // val filteredIntent = sanitizer.sanitizeByFiltering(untrustedIntent)
-        // startActivity(filteredIntent)
+    val safeIntent = try {
+        val untrusted = IntentCompat.getParcelableExtra(intent, "EXTRA_NESTED_INTENT", Intent::class.java)
+            ?: return
+        sanitizer.sanitizeByThrowing(untrusted)
+    } catch (_: SecurityException) {
+        Log.w("SECURITY_ALERT", "Blocked non-allowlisted nested intent")
+        return
+    } catch (_: BadParcelableException) { // e.g. an extra naming an unknown Parcelable/Serializable
+        Log.w("SECURITY_ALERT", "Malformed nested intent")
+        return
     }
+
+    // The sanitizer doesn't enforce presence; check what the target actually requires.
+    if (safeIntent.getStringExtra("user_display_name") == null) {
+        Log.w("SECURITY_ALERT", "Nested intent missing user_display_name")
+        return
+    }
+    startActivity(safeIntent)
 }
-   
 ```
 
 <br />
 
 ### 3. Custom signature permission protection
 
-Declare a custom signature-level permission in the manifest to secure family app communication.
+Declare a custom signature-level permission in the manifest to secure family app
+communication.
 
 - **Expected Inputs:** Manifest configuration.
-- **Expected Outputs:** An activity that can only be launched by apps signed with the same developer certificate.
+- **Expected Outputs:** An activity restricted to apps signed with the same developer certificate.
 
-<br />
 
 ```xml
 <permission
     android:name="com.example.snippets.permission.INTERNAL_COMMUNICATION"
     android:protectionLevel="signature" />
-   
 ```
 
 <br />
 
-<br />
 
 ```xml
 <activity
@@ -229,21 +279,20 @@ Declare a custom signature-level permission in the manifest to secure family app
         <category android:name="android.intent.category.DEFAULT" />
     </intent-filter>
 </activity>
-   
 ```
 
 <br />
 
 ### 4. Safe onNewIntent lifecycle verification (warm boot protection)
 
-Ensure that activities reusing dynamic intents (for example, in background launch paths) apply the same strict security filters inside `onNewIntent`.
+Ensure that activities reusing dynamic intents (for example, in background
+launch paths) apply the same strict security filters inside `onNewIntent`.
 
 - **Expected Inputs:**
   - `newIntent` (`Intent`): The newly delivered intent.
 - **Expected Outputs:**
   - Executes processing logic only if the new intent passes security validation.
 
-<br />
 
 ```kotlin
 override fun onNewIntent(newIntent: Intent) {
@@ -263,7 +312,6 @@ override fun onNewIntent(newIntent: Intent) {
 private fun validateIntent(intent: Intent): Boolean {
     return intent.hasExtra("VALID_PAYLOAD_MARKER")
 }
-   
 ```
 
 <br />
@@ -277,7 +325,6 @@ Enforce immutability unless mutability is explicitly required.
 - **Expected Inputs (Mutable):** An intent with an explicit component set.
 - **Expected Outputs (Mutable):** A mutable `PendingIntent` locked to a specific receiver component to prevent hijacking.
 
-<br />
 
 ```kotlin
 fun createPendingIntents(context: Context) {
@@ -302,14 +349,14 @@ fun createPendingIntents(context: Context) {
         PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 }
-   
 ```
 
 <br />
 
 ### 6. Secure ContentProvider configuration and queries
 
-Expose a ContentProvider securely and parameterize queries to prevent SQL injection.
+Expose a ContentProvider securely and parameterize queries to prevent SQL
+injection.
 
 - **Expected Inputs:**
   - `uri` (`Uri`): The query URI.
@@ -319,7 +366,6 @@ Expose a ContentProvider securely and parameterize queries to prevent SQL inject
 - **Expected Outputs:**
   - `Cursor`: Filtered query results, strictly bound to projection maps.
 
-<br />
 
 ```xml
 <provider
@@ -329,12 +375,10 @@ Expose a ContentProvider securely and parameterize queries to prevent SQL inject
     android:readPermission="com.example.snippets.permission.READ_DATA"
     android:writePermission="com.example.snippets.permission.WRITE_DATA"
     android:grantUriPermissions="false" />
-   
 ```
 
 <br />
 
-<br />
 
 ```kotlin
 override fun query(
@@ -360,21 +404,20 @@ override fun query(
     val db = dbHelper.readableDatabase
     return queryBuilder.query(db, projection, selection, selectionArgs, null, null, sortOrder)
 }
-   
 ```
 
 <br />
 
 ### 7. Service caller signature verification
 
-Verify the calling application's signature before binding to a service.
+Verify the calling application's signing certificate on incoming cross-process
+IPC calls in an exported bound service.
 
 - **Expected Inputs:**
-  - `intent` (`Intent`): The binding request intent.
+  - An incoming cross-process Binder transaction (for example, an AIDL `Stub` method call or `onTransact()`).
 - **Expected Outputs:**
-  - `IBinder`: Local binder instance if caller signature matches trusted partner; throws `SecurityException` otherwise.
+  - Executes the requested service operation if the calling UID's signing certificate matches the trusted partner hash; throws `SecurityException` otherwise.
 
-<br />
 
 ```kotlin
 class SecureBoundService : Service() {
@@ -383,47 +426,44 @@ class SecureBoundService : Service() {
         private const val TRUSTED_PARTNER_SHA256 = "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U1V="
     }
 
-    override fun onBind(intent: Intent): IBinder {
-        // Return the binder. Do NOT perform signature verification in onBind() because
-        // the binder connection is cached by Android, which can bypass checks on subsequent binds.
-        return LocalBinder()
-    }
-
-    private fun enforceTrustedCaller() {
-        val callingUid = Binder.getCallingUid()
-        // Allow calls from the same application
-        if (callingUid == Process.myUid()) {
-            return
-        }
-        val pm = packageManager
-        val packages = pm.getPackagesForUid(callingUid)
-
-        if (packages.isNullOrEmpty() || !verifySignature(pm, packages[0])) {
-            throw SecurityException("Access Denied: Caller signature is untrusted.")
-        }
-    }
-
-    private fun verifySignature(pm: PackageManager, packageName: String): Boolean {
-        try {
-            val trustedSha256Raw = Base64.decode(TRUSTED_PARTNER_SHA256, Base64.DEFAULT)
-            // API 28+ handles rotated certificates and avoids manual hashing.
-            // Since minSdk is 36, this is always available.
-            return pm.hasSigningCertificate(packageName, trustedSha256Raw, PackageManager.CERT_INPUT_SHA256)
-        } catch (e: Exception) {
-            Log.e("SECURITY_ERROR", "Verification failed for package: $packageName", e)
-        }
-        return false
-    }
-
-    inner class LocalBinder : Binder() {
-        fun doSecureWork() {
-            // Verify caller identity on every transaction method call
+    // Use an AIDL Stub for cross-process IPC
+    private val binder = object : IMyService.Stub() {
+        override fun doSecureWork() {
+            // Verify caller identity inside the active Binder IPC transaction
             enforceTrustedCaller()
             // Safe to proceed with sensitive operations
         }
     }
+
+    override fun onBind(intent: Intent): IBinder {
+        // Return the AIDL Stub. Do NOT perform Binder.getCallingUid() checks in onBind()
+        // because onBind() is invoked asynchronously by system_server and the IBinder is cached.
+        return binder
+    }
+
+    private fun enforceTrustedCaller() {
+        val callingUid = Binder.getCallingUid()
+        if (callingUid == Process.myUid() || !verifyUidSignature(callingUid)) {
+            throw SecurityException("Access Denied: Unauthorized or local/cleared-identity caller.")
+        }
+    }
+
+    private fun verifyUidSignature(callingUid: Int): Boolean {
+        return try {
+            val trustedSha256Raw = Base64.decode(TRUSTED_PARTNER_SHA256, Base64.DEFAULT)
+            // PackageManager.hasSigningCertificate(uid, ...) (API 28+) checks the UID directly
+            // and handles certificate rotation.
+            packageManager.hasSigningCertificate(
+                callingUid,
+                trustedSha256Raw,
+                PackageManager.CERT_INPUT_SHA256
+            )
+        } catch (e: IllegalArgumentException) {
+            Log.e("SECURITY_ERROR", "Invalid certificate hash format", e)
+            false
+        }
+    }
 }
-   
 ```
 
 <br />
@@ -432,9 +472,9 @@ class SecureBoundService : Service() {
 
 ## Error handling
 
-Handle component binding, database queries, and intent redirection failures securely to avoid exposing internal structures.
+Handle component binding, database queries, and intent redirection failures
+securely to avoid exposing internal structures.
 
-<br />
 
 ```kotlin
 fun safeErrorHandling(callingPackage: String?) {
@@ -454,24 +494,22 @@ fun safeErrorHandling(callingPackage: String?) {
         Log.w("INTEGRITY_WARNING", "Missing intent parameter", e)
     }
 }
-   
 ```
 
 <br />
 
-    // Secure handling of ContentProvider queries on the client side:
-    try {
-        val cursor = contentResolver.query(providerUri, projection, selection, selectionArgs, null)
-    } catch (e: SQLiteException) {
-        Log.e("PROVIDER_ERROR", "ContentProvider database query failed", e)
-        // Secure handling: prevent raw query syntax details from leaking to UI
-    }
+When querying a `ContentProvider` on the client side, catch `SQLiteException`
+and log a generic error message rather than exposing raw query syntax details
+to the user interface.
 
 *** ** * ** ***
 
 ## Reporting guidelines
 
-When this skill is executed to apply security hardening updates to a codebase, the agent **MUST** generate a structured "Best Practices and Security Alignment Update" report for the developer. The report **must** be written to the session artifact folder (or printed in the final response) and include:
+When this skill is executed to apply security hardening updates to a codebase,
+the agent **MUST** generate a structured "Security Hardening and Alignment
+Update" report for the developer. The report **must** be written to the session
+artifact folder (or printed in the final response) and include:
 
 1. **Security alignment area:** The category of improvement applied (for example, Safe Intent Redirection, Secure PendingIntent Configuration, ContentProvider Data Guarding).
 2. **Impact and priority:** The potential safety risk addressed by the update (for example, Component Hijacking Prevention, Private Data Isolation).
@@ -479,11 +517,11 @@ When this skill is executed to apply security hardening updates to a codebase, t
 4. **Implementation summary:** Concrete details of the solution (for example, "Updated nested intent parsing to use the `IntentSanitizer` API with a strict component allowlist").
 5. **Code diff:** Standard unified diffs showing the exact modifications.
 
-### Best practices and security alignment update template
+### Security hardening and alignment update template
 
-Use the following markdown template when reporting changes to developers:
+Use the following Markdown template when reporting changes to developers:
 
-    ### Best practices and security alignment update: [Security Alignment Area]
+    ### Security hardening and alignment update: [Security Alignment Area]
 
     *   **Improvement Description:** [Brief description of the hardening update and why it's recommended]
     *   **Priority Level:** [High / Medium / Low]
@@ -496,17 +534,19 @@ Use the following markdown template when reporting changes to developers:
     #### Implementation diff
     ```diff
     // Insert Unified Diff here
+    ```
 
-#### Testing and verification
+    #### Testing and verification
 
-1. \[Step 1 to verify the component behaves correctly, for example, run component unit test\]
-2. \[Step 2 to verify regression safety\] \`\`\`
+    1.  [Step 1 to verify the component behaves correctly, for example, run
+        component unit test]
+    2.  [Step 2 to verify regression safety]
 
-*** ** * ** ***
+## Quality checklist
 
-## Antipatterns
+### NEVER
 
-- **NEVER** launch a nested `Intent` received from an untrusted source without verifying its target package and exported status.
+- **NEVER** launch a nested `Intent` received from an untrusted source without verifying that its resolved component (`packageName` and `className`) matches an explicit allowlist and rejecting or stripping URI permission grant flags.
 - **NEVER** use sticky broadcasts (`sendStickyBroadcast`).
 - **NEVER** assume an exported component is safe because it runs in a background thread or performs internal checks.
 - **NEVER** expose sensitive functionalities (like SSO authentication or payment processors) to components without signature-level permission restrictions.
@@ -515,16 +555,17 @@ Use the following markdown template when reporting changes to developers:
 - **NEVER** use dynamic string concatenation to construct selection blocks inside a `ContentProvider` query.
 - **NEVER** use `Binder.getCallingUid` inside a `BroadcastReceiver.onReceive` to identify the sender of a broadcast, as it returns the receiver's own UID, not the sender's.
 
-## Best Practices
+### DO
 
 - **MUST** explicitly set `android:exported="false"` for all components that don't need external communication.
 - **MUST** protect all exported components with custom permissions utilizing `android:protectionLevel="signature"` when communicating between family apps.
 - **MUST** validate all incoming intent extras and handle missing parameters gracefully to prevent crashes.
 - **MUST** rely on the system's **Protected Broadcast** mechanism for system events (for example, boot completed, package changes), as the system prevents untrusted apps from spoofing these actions.
-- **MUST** protect custom broadcasts with signature-level permissions or use `RECEIVER_NOT_EXPORTED` for dynamic receivers to restrict the sender identity.
+- **MUST** protect custom broadcasts with signature permissions or use `RECEIVER_NOT_EXPORTED` for dynamic receivers to restrict the sender.
+- **MUST** declare the `${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` signature `<permission>` and `<uses-permission>` in `AndroidManifest.xml` when `minSdk < 33`.
 - **MUST** call `setIntent(newIntent)` inside `onNewIntent()` before processing payloads to keep active references updated.
 - **MUST** use `PendingIntent.FLAG_IMMUTABLE` by default when constructing `PendingIntent` instances.
 - **MUST** protect exported `ContentProviders` with `readPermission` and `writePermission`.
-- **MUST** enforce parameterized selection structures in `ContentProvider` query/update methods.
-- **MUST** verify the package signature fingerprint of binding applications at runtime inside exported services.
+- **MUST** enforce parameterized selection structures in `ContentProvider` query and update methods.
+- **MUST** verify the caller's signing certificate on every IPC call in exported services using an AIDL `Stub` or `Messenger`.
 - **MUST** use `androidx.core.content.IntentSanitizer` to sanitize incoming dynamic intents before redirection, if AndroidX Core 1.9.0+ is imported in the project.
